@@ -1,0 +1,113 @@
+🚀 Step 1: Core Foundation (Backend + Basic Mobile App)
+
+Backend (Module 1 – IDS Engine API)
+
+Build a simple API in Python (FastAPI/Flask) that receives network logs and raises alerts.
+
+Start with a lightweight ML/DL model (e.g., Isolation Forest or AE for anomaly detection).
+
+Store alerts in PostgreSQL.
+
+Mobile App (Module 2 – Basic UI)
+
+Create a Flutter/React Native app with login/authentication.
+
+Show a basic alert list (fetched from backend).
+
+✅ At this stage: You’ll have a working “skeleton” IDS app with login + alerts.
+
+⚡ Step 2: Real-time Monitoring & Notifications
+
+Module 3 – Real-time Alerts
+
+Integrate WebSockets (Socket.IO or FastAPI WebSocket) for live alerts.
+
+Add Firebase/FCM push notifications for anomalies.
+
+Module 4 – Historical Alert Analytics
+
+Create backend APIs to fetch aggregated stats.
+
+Add charts/graphs in app (use Chart.js / D3.js / Recharts).
+
+✅ Now the app is actively notifying and showing past alert trends.
+
+🔍 Step 3: Explainability & Feedback
+
+Module 5 – Explainability (SHAP/LIME)
+
+Integrate SHAP/LIME on backend models.
+
+Send feature attribution explanations with each alert.
+
+Mobile app: “Why flagged?” explanation dashboard.
+
+Module 6 – User Feedback
+
+Add “Mark as False Positive/Negative” button in app.
+
+Store feedback in DB → connect to retraining pipeline later.
+
+✅ At this stage: Alerts are explainable + user can give feedback.
+
+🌐 Step 4: Advanced Network Visuals & Edge Sync
+
+Module 7 – Live Network Graph View
+
+Use Neo4j + NetworkX/D3.js for backend graph computation.
+
+Mobile app: interactive graph view with anomaly hot-spots.
+
+Module 8 – Edge Sync & Local Detection
+
+Implement lightweight self-supervised module (MAE, small AE) for local anomaly filtering.
+
+Sync with edge routers/devices (using MQTT or gRPC).
+
+✅ Now IDS works across devices + gives rich visual context.
+
+🤖 Step 5: Learning & Model Management
+
+Module 9 – Continual Learning Updates
+
+Backend: periodic retraining with feedback + new logs.
+
+Mobile app: notification when model is updated.
+
+Module 10 – Adaptive Sensitivity Control
+
+Let users adjust detection thresholds.
+
+Auto-adjust thresholds based on explainability insights.
+
+✅ Now IDS is self-improving + adaptive.
+
+🔐 Step 6: Security & Final Touch
+
+Module 11 – Security Layer
+
+Secure authentication (OAuth2/JWT).
+
+Encrypt all comms with TLS + DB at rest encryption.
+
+Module 12 – Reports & Configurable Alerts
+
+Daily/weekly explainable reports.
+
+User-configurable alert filters (severity/type/source IP).
+
+✅ Final polished version: secure, customizable, and production-ready.
+
+🗺️ Final Roadmap Flow:
+
+Backend IDS Core + Basic Mobile App
+
+Realtime Alerts + Analytics
+
+Explainability + Feedback Loop
+
+Network Graphs + Edge Sync
+
+Continual Learning + Adaptive Sensitivity
+
+Security + Configurable Reports

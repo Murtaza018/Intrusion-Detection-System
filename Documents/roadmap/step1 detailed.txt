@@ -1,0 +1,76 @@
+✅ Step 1: Core Foundation
+1. Backend (Module 1 – IDS Engine API)
+
+We’ll build a simple backend first.
+
+Tech stack:
+
+Python → FastAPI (clean, async, well-documented)
+
+PostgreSQL → Store users + alerts
+
+SQLAlchemy ORM → Easy DB interaction
+
+ML model → Isolation Forest (for anomaly detection demo)
+
+👉 Plan:
+
+Setup FastAPI project
+
+Setup PostgreSQL connection (with SQLAlchemy)
+
+Create database tables:
+
+users (id, username, password hash, email, etc.)
+
+alerts (id, message, severity, timestamp)
+
+Add routes:
+
+POST /auth/register → create user
+
+POST /auth/login → login with JWT
+
+POST /alerts → backend creates alert (for now we simulate logs)
+
+GET /alerts → fetch alerts for logged-in user
+
+Integrate ML: basic Isolation Forest to mark logs as “normal” or “anomaly”.
+
+2. Mobile App (Module 2 – Basic UI)
+
+Once backend is ready, we’ll connect a simple mobile app.
+
+Tech stack:
+
+React Native (since you already know React.js — smoother learning curve than Flutter)
+
+Axios (for API requests)
+
+React Navigation (for switching between Login → Alerts page)
+
+👉 Plan:
+
+Setup React Native project (npx react-native init idsApp)
+
+Create screens:
+
+LoginScreen (login with backend JWT)
+
+RegisterScreen (signup user)
+
+AlertsScreen (fetch alerts from backend & display list)
+
+Store JWT token securely (AsyncStorage or SecureStore)
+
+✅ What you’ll have at the end of Step 1:
+
+A working backend with auth + anomaly detection model
+
+A basic mobile app that:
+
+Lets users register/login
+
+Fetches alerts from backend
+
+Displays them in a list

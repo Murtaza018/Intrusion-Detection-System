@@ -10,34 +10,34 @@ https://arxiv.org/abs/2502.07119?utm_source=chatgpt.com
 
 Mobile App Functional Features (10+):
 
-Design a Mobile Monitoring & Alert App for IDS systems, integrating 2–3 core advanced features drawn from future directions above (highlighted with bold):
+1-Design a Mobile Monitoring & Alert App for IDS systems, integrating 2–3 core advanced features drawn from future directions above (highlighted with bold):
 
-Real-time Alert Notifications – Push alerts when anomalies detected.
+2-Real-time Alert Notifications – Push alerts when anomalies detected.
 
-Visual Explanation Dashboard – Show feature attributions via SHAP/LIME (from Topic 2 & 3 future directions).
+3-Visual Explanation Dashboard – Show feature attributions via SHAP/LIME (from Topic 2 & 3 future directions).
 
-Feedback Submission – Users can mark alerts as false positives/negatives, feeding back to retraining (Topic 3).
+4-Feedback Submission – Users can mark alerts as false positives/negatives, feeding back to retraining (Topic 3).
 
-Live Network Graph View – Interactive visualization of network graph topology and anomaly hot-spots (Topic 2).
+5-Live Network Graph View – Interactive visualization of network graph topology and anomaly hot-spots (Topic 2).
 
-Adaptive Sensitivity Control – Use insights from explanations to adjust detection thresholds dynamically (Topic 3).
+6-Adaptive Sensitivity Control – Use insights from explanations to adjust detection thresholds dynamically (Topic 3).
 
-Embedded Self-Supervised Module – Lightweight MAE-based anomaly embedding engine runs locally for preliminary filtering (Topic 1).
+7-Embedded Self-Supervised Module – Lightweight MAE-based anomaly embedding engine runs locally for preliminary filtering (Topic 1).
 
-Continual Learning Updates – App periodically receives model updates reflecting streaming data learning (Topic 1).
+8-Continual Learning Updates – App periodically receives model updates reflecting streaming data learning (Topic 1).
 
-Edge Device Sync – Sync with edge nodes (e.g., routers) that run ensemble IDS components (Topic 2).
+9-Edge Device Sync – Sync with edge nodes (e.g., routers) that run ensemble IDS components (Topic 2).
 
-Historical Alert Analytics – Trend charts of intrusion types, volume, and performance metrics.
+10-Historical Alert Analytics – Trend charts of intrusion types, volume, and performance metrics.
 
-User-Configurable Alerts – Set custom filters (by severity, type, source IP).
+11-User-Configurable Alerts – Set custom filters (by severity, type, source IP).
 
-Explainable Summary Reports – Generate daily/weekly summaries with explainability insights.
+12-Explainable Summary Reports – Generate daily/weekly summaries with explainability insights.
 
-Edge-Local Computation – Run lightweight detection directly on-device for offline alerting (Topic 1).
+13-Edge-Local Computation – Run lightweight detection directly on-device for offline alerting (Topic 1).
 
-Secure Authentication & Encryption – Protect app communications with IDS backend.
+14-Secure Authentication & Encryption – Protect app communications with IDS backend.
 
-Model Update Management – Notifications and progress for when new detection model versions are downloaded (Topics 1 & 2).
+15-Model Update Management – Notifications and progress for when new detection model versions are downloaded (Topics 1 & 2).
 
 

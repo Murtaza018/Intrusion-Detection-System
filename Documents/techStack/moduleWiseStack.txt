@@ -1,0 +1,122 @@
+🔹 Tech Stack (Module-Wise)
+1. Data Collection & Preprocessing Module (IDS Backend)
+
+Purpose: Capture network traffic, preprocess logs, extract features.
+
+Tech:
+
+Packet Capture: Zeek, Suricata, or TShark
+
+Stream Processing: Apache Kafka / RabbitMQ
+
+Feature Engineering: Python (scikit-learn, pandas, numpy)
+
+Database: PostgreSQL (structured logs) + TimescaleDB/InfluxDB (time-series alerts)
+
+2. Anomaly Detection & ML/Deep Learning Module
+
+Purpose: Detect intrusions using supervised + self-supervised methods.
+
+Tech:
+
+Deep Learning Frameworks: PyTorch / TensorFlow
+
+Self-Supervised Learning: MAE (Masked Autoencoders), Contrastive Learning
+
+Streaming Models: River (for online learning)
+
+Model Serving: TorchServe / TensorFlow Serving
+
+Containerization: Docker for deployment
+
+3. Explainability & Visualization Module
+
+Purpose: Explain decisions & visualize features.
+
+Tech:
+
+Explainability: SHAP, LIME, Captum (PyTorch)
+
+Visualization Backend: Plotly/Dash or FastAPI returning JSON explanations
+
+Network Graphs: NetworkX, Graphviz, or Neo4j + D3.js (frontend)
+
+4. Mobile App (Monitoring & Alerts)
+
+Purpose: End-user app for real-time alerts & feedback.
+
+Tech:
+
+Framework: Flutter (cross-platform, Android + iOS)
+
+Push Notifications: Firebase Cloud Messaging (FCM)
+
+UI/Charts: Flutter Charts, D3.js (via webview), Plotly
+
+Secure Auth: OAuth2 / JWT
+
+5. Feedback & Adaptive Control Module
+
+Purpose: Let users mark alerts as false positive/negative + adjust sensitivity.
+
+Tech:
+
+Backend: FastAPI / Node.js (Express) REST APIs
+
+Database: PostgreSQL (feedback logging)
+
+Retraining: Scheduled retraining jobs via Airflow/Kubeflow
+
+Threshold Tuning: Config managed in etcd/Consul, dynamically pushed
+
+6. Edge & Local Processing Module
+
+Purpose: Run lightweight detection on routers/mobile (offline alerts).
+
+Tech:
+
+Framework: TinyML / TensorFlow Lite / PyTorch Mobile
+
+Deployment: ONNX models for cross-framework compatibility
+
+Edge Sync: MQTT / gRPC for router ↔ backend sync
+
+7. Continual Learning & Model Update Module
+
+Purpose: Keep models fresh with streaming & periodic updates.
+
+Tech:
+
+Online Learning: River (Python) for incremental updates
+
+CI/CD for ML Models: MLflow + DVC for version control
+
+Model Distribution: Mobile receives updates via secure HTTPS + signature verification
+
+8. Security & Communication Module
+
+Purpose: Protect IDS app & backend communications.
+
+Tech:
+
+Encryption: TLS 1.3
+
+Auth: OAuth2.0 / OpenID Connect
+
+Key Management: HashiCorp Vault
+
+App Security: SSL Pinning in Flutter
+
+✅ Summary
+
+Backend (IDS Core) → Python (FastAPI, PyTorch/TensorFlow, Kafka, PostgreSQL)
+
+Explainability & Graphs → SHAP/LIME, Plotly/Dash, NetworkX/Neo4j
+
+Mobile App → Flutter + Firebase (push), JWT Auth
+
+Edge Module → TensorFlow Lite / PyTorch Mobile + MQTT sync
+
+DevOps → Docker, Kubernetes, MLflow, Airflow/Kubeflow
+
+Security → TLS 1.3, OAuth2, Vault

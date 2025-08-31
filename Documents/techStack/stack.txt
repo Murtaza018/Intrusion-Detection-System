@@ -1,0 +1,311 @@
+Full tech stack — overview
+
+Mobile app (cross-platform primary): React Native (primary) or Flutter (alt)
+
+Backend API & orchestration: Node.js + Express (primary) or Python FastAPI (alt)
+
+Model training & research: Python (PyTorch primary)
+
+Model serving: TorchServe / Triton (primary) or FastAPI + Uvicorn (alt)
+
+Edge inference: ONNX Runtime / TensorFlow Lite (for mobile/edge)
+
+Message broker / streaming: Apache Kafka (primary) or MQTT (Eclipse Mosquitto / EMQX) for lightweight edge sync (alt)
+
+Database(s): Timeseries DB (InfluxDB or TimescaleDB) + relational (Postgres) + vector DB (Milvus/Weaviate) for embeddings
+
+Feature store / data lake: Feast / S3 (minio)
+
+Explainability libs: SHAP, LIME, ELI5 (Python)
+
+Anomaly detector: MAE (PyTorch) + LOF (scikit-learn) + optionally PyOD
+
+CI/CD & infra as code: GitHub Actions + Terraform
+
+Containerization & orchestration: Docker + Kubernetes (EKS/GKE/AKS)
+
+Push notifications: Firebase Cloud Messaging (FCM) + APNs (iOS) or OneSignal for cross-platform
+
+Observability: Prometheus + Grafana + ELK (Elasticsearch + Logstash + Kibana)
+
+Auth & security: OAuth2 / OpenID Connect (Keycloak) + mTLS + Vault (secrets)
+
+Mobile local DB & sync: SQLite (or WatermelonDB) + Realm Sync (optional)
+
+Realtime UI & websockets: WebSocket / SignalR (alt) or socket.io
+
+Device management / OTA: Mender (edge) or custom S3-based updates with signed manifests
+
+Encryption: TLS 1.3 everywhere, AES-256 for at-rest, end-to-end encryption options for sensitive telemetry
+
+Hosting: AWS / GCP / Azure (choose one); or hybrid with edge on-prem
+
+Detailed components & recommended technologies
+1) Mobile client (monitoring + actions)
+
+Primary: React Native (TypeScript)
+Why: Fast cross-platform UI, huge ecosystem, supports native modules for ML (TFLite, ONNX).
+Alternatives: Flutter (Dart) — great performance and UI.
+
+Key libs & tools
+
+UI: React Native + React Navigation + NativeBase / React Native Paper
+
+State: Redux Toolkit or Recoil
+
+Networking: axios / react-query (for caching)
+
+Local DB: SQLite (react-native-sqlite-storage) or WatermelonDB (better for large local datasets)
+
+Push: Firebase Cloud Messaging + react-native-firebase
+
+Offline ML runtime: ONNX Runtime Mobile or TensorFlow Lite (via native bridge)
+
+Secure storage: react-native-keychain for tokens
+
+OTA updates: CodePush (App Center) for JS bundle updates; full binary updates via Play Store / App Store
+
+Mobile-side ML features
+
+Lightweight MAE inference: run ONNX-converted encoder locally for preliminary filtering (item 7 & 13).
+
+Local detection fallback: run a tiny LOF or thresholding on-device for offline alerts.
+
+Explainability UI: render SHAP bar charts sent from backend (or compute SHAP on-device for a very small explainer).
+
+2) Backend & API
+
+Primary: Node.js (TypeScript) + Express or NestJS (more structured)
+Alternative: Python FastAPI (if you want Python full-stack & simplify ML integration)
+
+Responsibilities
+
+Accept telemetry from edge & mobile
+
+Host REST/gRPC for control, push triggers for notifications
+
+Manage authentication, user and device config, alert history
+
+Provide explainability endpoints (SHAP/LIME results), model management endpoints
+
+Relay model updates and retraining jobs to MLOps
+
+Key libs
+
+API: Express / NestJS (TypeScript)
+
+Websockets: socket.io or ws
+
+Task queues: BullMQ (Redis) or Celery (if Python)
+
+Authentication: OAuth2/OIDC via Keycloak or Auth0
+
+Secrets: HashiCorp Vault
+
+3) Streaming, eventing & edge sync
+
+Primary: Apache Kafka (Confluent or MSK) for high-throughput telemetry
+Alternative: MQTT (EMQX / Mosquitto) for lightweight edge devices
+
+Notes
+
+Use MQTT for low-power IoT devices and downstream Kafka on the cloud using bridge connectors.
+
+Kafka Connect for ingesting into DBs, S3, or processing pipelines.
+
+Use topics for: raw-flows, preprocessed, alerts, feedback, model-updates.
+
+4) ML research & training stack
+
+Primary languages: Python (3.10+)
+Libraries
+
+Deep learning: PyTorch (preferred) or TensorFlow
+
+MAE: timm / torchvision transformers or custom encoder-decoder
+
+AutoML / HPO: Optuna
+
+Preprocessing: pandas, scikit-learn
+
+Anomaly detectors: scikit-learn (LOF), PyOD
+
+Explainability: SHAP, LIME, ELI5
+
+Tabular-to-image: DeepInsight pipeline (scikit-learn + openTSNE / umap-learn)
+
+Notebook env: Jupyter / JupyterLab
+
+Model formats
+
+Export to ONNX for edge/mobile (ONNX Runtime)
+
+Optionally export to TorchScript for TorchServe
+
+5) Model serving & inference
+
+Primary: Triton Inference Server or TorchServe
+Alternative: FastAPI + Uvicorn + Gunicorn for custom endpoints
+
+Serving patterns
+
+Online ensemble server: low-latency endpoint for full models (XGBoost/CatBoost/Torch)
+
+Explainer jobs: batch or on-demand SHAP calculations (heavy)
+
+Edge update server: host lightweight encoders/MAE weights packaged as ONNX/TFLite
+
+Autoscaling
+
+Use Kubernetes Horizontal Pod Autoscaler, configure GPU nodes for heavy model serving.
+
+6) Feature store & data storage
+
+Feature store: Feast (store feature vectors for training/serving)
+
+Blob storage: S3-compatible (Amazon S3 or MinIO) for raw pcap/flows and artifacts
+
+Relational DB: PostgreSQL (user/accounts, metadata)
+
+Timeseries DB: InfluxDB or TimescaleDB (for telemetry / metrics / alert counts)
+
+Search & analytics: ElasticSearch (for logs & fast searches)
+
+Vector DB (if using embedding search for anomaly contexts): Milvus or Weaviate
+
+7) Explainability & user-facing explanations
+
+Compute global explanations (feature importances) offline using SHAP/TreeExplainer for tree-based models (fast).
+
+For per-alert explanations: compute local SHAP values (or LIME) on request and cache results.
+
+Expose formatted explainability payload:
+
+{
+  "top_features":[{"name":"sttl","value":0.12,"shap":0.45}, ...],
+  "global_importances": [...],
+  "explanation_text":"The high ct_srv_dst and low sttl indicate..."
+}
+
+
+Visualize in the mobile app with small bar charts and sparkline trends. Heavy explainability computation should remain server-side.
+
+8) Feedback loop & continual learning
+
+Feedback capture: mobile app sends user labels (false positive/neg) back to backend via secure REST endpoints or Kafka topic user-feedback.
+
+Data pipeline:
+
+Feedback → staging DB → label validator (human-in-the-loop optional) → training dataset
+
+Retraining & model promotion:
+
+Use Kubeflow / Airflow to orchestrate model retraining pipelines.
+
+Use Canary deployments for new models (A/B), rollbacks available.
+
+Model registry: MLflow or Seldon Model Registry for versions & metadata.
+
+9) Edge device & local inference
+
+Edge runtime: ONNX Runtime or TensorFlow Lite (for ARM devices and routers)
+
+Edge sync: MQTT for commands, SFTP / HTTPS for model downloads, or CIOT agent (custom) that checks for signed updates
+
+Hardware: Raspberry Pi 4/Compute Module for prototyping; NVIDIA Jetson family for GPU-enabled edge inference
+
+Edge components: lightweight ensemble (signature rules + MAE encoder + a small LOF) to pre-filter flows and send only suspicious flows to cloud
+
+10) Notifications & UX features
+
+Push: FCM (Android) + APNs (iOS) via server FCM API
+
+In-app filtering: send minimal alert payload to mobile; fetch richer explainability only on demand to save bandwidth
+
+User-configurable alerts: store user filtering preferences in Postgres; enforce server-side filters to avoid over-pushing
+
+11) Security & compliance
+
+Authentication: Keycloak (OpenID Connect) or Auth0; multi-tenant support if needed
+
+Authorization: RBAC + field-level permissions
+
+Encryption: TLS 1.3 everywhere; AES-256 at rest for DBs & S3 objects
+
+Secrets: HashiCorp Vault for keys & certificates
+
+Mutual TLS: between edge devices and backend for trust
+
+Audit logging: WORM logs in ElasticSearch / S3 for compliance
+
+Penetration testing: periodic security scans + SAST/DAST in CI
+
+12) Observability & ops
+
+Metrics: Prometheus + Grafana dashboards (alerts/sec, model drift, latencies)
+
+Traces: Jaeger / OpenTelemetry
+
+Logs: Filebeat → Logstash → Elasticsearch → Kibana (ELK)
+
+Alerting: Alertmanager for infra alerts; mobile critical alerts via push
+
+13) DevOps & CI/CD
+
+Containers: Docker, images stored in ECR/GCR/ACR
+
+K8s: EKS / GKE / AKS; manage with Helm charts
+
+Pipelines: GitHub Actions or GitLab CI to run tests, build images, push artifacts, trigger deployments
+
+Infra as Code: Terraform + Terragrunt
+
+Secrets & config: SOPS / Vault integration for encrypted configs
+
+Data & model flow (interaction summary)
+
+Edge routers / agents collect flows, run lightweight MAE/LOF locally —> suspicious flows pushed to cloud via MQTT/Kafka.
+
+Cloud ingestion: Kafka topic → preprocessing service → feature store → model inference service.
+
+Inference: Ensemble (MAE encoder + XGBoost/CatBoost + LOF) yields alerts + explainability metadata (SHAP).
+
+Notifications: Backend pushes alert notification to mobile via FCM; mobile may request detailed SHAP explanation.
+
+Feedback: Mobile sends FP/FN flags → feedback topic → retraining pipelines.
+
+Model updates: Trained/validated models packaged as ONNX/TFLite and published to edge update endpoints; update managed via signed manifests and device agent.
+
+Deployment & sizing notes
+
+Small PoC: single cloud VM (t3.large), PostgreSQL managed, Kafka single-node or managed (Confluent), simple k8s (k3s).
+
+Production: k8s cluster, separate worker and GPU node pools, managed Kafka (MSK/Confluent), multi-AZ Postgres (RDS), S3 for storage, autoscaling Triton/TorchServe.
+
+Edge scale: for thousands of devices, prefer MQTT brokers (EMQX) with bridge to Kafka; use device gateway and certificate-based auth.
+
+Quick implementation roadmap (3 milestones)
+
+MVP (4–6 weeks)
+
+Mobile app basic UI, push alerts, user auth, backend REST endpoints, minimal rule-based detection + alerting, feedback capture.
+
+Core ML & Explainability (6–10 weeks)
+
+Implement MAE encoder (PyTorch), export ONNX, server-side ensemble inference, SHAP explainability endpoints, visualize SHAP in app.
+
+Edge & Continuous Learning (ongoing)
+
+Edge ONNX runtime integration, model update management, Kafka pipelines, retraining workflow with Optuna HPO, canary deployments.
+
+Final suggestions & best practices
+
+Start simple: get push alerts, feedback, and logging working before heavy ML.
+
+Keep explanations lightweight: compute heavy SHAP in batch or on-demand with caching.
+
+Model governance: maintain model registry and A/B test every update.
+
+Privacy: aggregate or anonymize IPs before storing long-term, comply with GDPR-like rules.
+
+Testing: simulate attacks in staging for reliability (use pcap corpora, synthetic attacks).

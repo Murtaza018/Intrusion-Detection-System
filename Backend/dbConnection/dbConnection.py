@@ -1,8 +1,17 @@
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, declarative_base
+from dotenv import load_dotenv
+import os
+from pathlib import Path
 
-# link to database
-DATABASE_URL = "postgresql+psycopg2://postgres:aloomian@localhost:5432/IDS"
+
+
+BASE_DIR = Path(__file__).resolve().parents[2]
+dotenv_path = BASE_DIR / ".env"
+
+load_dotenv(dotenv_path=dotenv_path)
+
+DATABASE_URL = os.getenv("DATABASE_URL")
 
 #creates engine and session(holds the pool of connections)
 engine = create_engine(DATABASE_URL)

@@ -1,3 +1,5 @@
+# Keeps audit trail of system activity (events, scans, rule checks).
+
 from sqlalchemy import Column, Integer, String
 from ..dbConnection import Base
 

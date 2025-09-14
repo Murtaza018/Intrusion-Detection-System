@@ -1,3 +1,6 @@
+# Stores IDS detection rules (signatures, thresholds, conditions).
+# Can be user-defined or system-generated.
+
 from sqlalchemy import Column, Integer, String
 from ..dbConnection import Base
 

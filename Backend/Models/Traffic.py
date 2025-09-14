@@ -1,3 +1,5 @@
+# Stores raw or processed network traffic records.
+
 from sqlalchemy import Column, Integer, String
 from ..dbConnection import Base
 

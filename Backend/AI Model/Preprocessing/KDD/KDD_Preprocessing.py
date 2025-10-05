@@ -7,7 +7,7 @@ from sklearn.pipeline import Pipeline
 import joblib
 
 # Load column names from file
-with open("../", "r") as f:
+with open("../Datasets/KDD/KDDNames.txt", "r") as f:
     col_names = f.read().strip().split(",")
 
 col_names = [c.strip() for c in col_names]

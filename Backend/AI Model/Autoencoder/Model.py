@@ -4,12 +4,12 @@ from tensorflow.keras import layers
 from sklearn.metrics import classification_report, roc_auc_score, confusion_matrix
 
 # 1. Load preprocessed data
-X_train = np.load("../Preprocessing/")
-y_train = np.load("y_train.npy")
-X_val   = np.load("X_val.npy")
-y_val   = np.load("y_val.npy")
-X_test  = np.load("X_test.npy")
-y_test  = np.load("y_test.npy")
+X_train = np.load("../Preprocessing/KDD/X_train.npy")
+y_train = np.load("../Preprocessing/KDD/y_train.npy")
+X_val   = np.load("../Preprocessing/KDD/X_val.npy")
+y_val   = np.load("../Preprocessing/KDD/y_val.npy")
+X_test  = np.load("../Preprocessing/KDD/X_test.npy")
+y_test  = np.load("../Preprocessing/KDD/y_test.npy")
 
 # 2. Use only NORMAL data for training
 X_train_normal = X_train[y_train == 0]

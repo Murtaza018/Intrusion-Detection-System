@@ -1,0 +1,54 @@
+Phase 1: Autoencoder (Baseline IDS) – Final Results
+
+Model Type: Autoencoder (Unsupervised, anomaly detection)
+Dataset: KDD (Preprocessed)
+Training Data: Normal traffic only
+Validation: Threshold tuned on validation set (best ROC/PR threshold chosen)
+Testing: Mixed normal + attack traffic
+
+🔹 Training Summary
+
+Epochs: 20
+
+Batch Size: 256
+
+Final Training Loss: ~0.2153
+
+Final Validation Loss: ~0.1906
+
+🔹 Threshold (Anomaly Detection)
+
+Best ROC Threshold: 0.1333
+
+Best PR Threshold: 0.1333
+
+Chosen Final Threshold: 0.1333
+
+🔹 Test Performance
+
+ROC-AUC: 0.8663
+
+Accuracy: 77%
+
+🔹 Classification Metrics
+Class	Precision	Recall	F1-Score	Support
+Normal (0)	0.67	0.91	0.77	9,711
+Attack (1)	0.91	0.66	0.77	12,833
+
+Macro Avg (balanced across classes): Precision = 0.79, Recall = 0.79, F1 = 0.77
+
+Weighted Avg (accounting for imbalance): Precision = 0.81, Recall = 0.77, F1 = 0.77
+
+🔹 Confusion Matrix
+	Predicted Normal	Predicted Attack
+Actual Normal	8,869	842
+Actual Attack	4,352	8,481
+🔹 Insights
+
+Good ROC-AUC (0.8663) → AE learned to separate normal vs. attack fairly well.
+
+High Recall for Normal (0.91) → Most normal traffic is correctly identified.
+
+Lower Recall for Attacks (0.66) → Some attacks are missed (false negatives).
+
+Balanced Precision/Recall, but not perfect → Expected for Phase 1 baseline.

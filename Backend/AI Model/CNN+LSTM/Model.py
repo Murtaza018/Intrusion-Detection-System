@@ -13,14 +13,9 @@ y_val   = np.load("../Preprocessing/KDD/y_val.npy")
 X_test  = np.load("../Preprocessing/KDD/X_test.npy")
 y_test  = np.load("../Preprocessing/KDD/y_test.npy")
 
-# Reshape to 3D (samples, timesteps, features)
-X_train = X_train.reshape((X_train.shape[0], X_train.shape[1], 1))
-X_val   = X_val.reshape((X_val.shape[0], X_val.shape[1], 1))
-X_test  = X_test.reshape((X_test.shape[0], X_test.shape[1], 1))
-
 num_classes = len(np.unique(y_train))
 
-# Class weights (handle imbalance)
+# Compute class weights for imbalance
 class_weights = class_weight.compute_class_weight(
     class_weight="balanced",
     classes=np.unique(y_train),
@@ -28,32 +23,42 @@ class_weights = class_weight.compute_class_weight(
 )
 class_weights = dict(enumerate(class_weights))
 
-# Model definition
+# Define CNN + LSTM model
 model = keras.Sequential([
     layers.Input(shape=(X_train.shape[1], X_train.shape[2])),
     layers.Conv1D(64, 3, activation="relu", padding="same"),
     layers.MaxPooling1D(2),
-    layers.Dropout(0.3),
-    layers.LSTM(64),
-    layers.Dropout(0.3),
+    layers.Dropout(0.5),
+    layers.LSTM(32, dropout=0.3, recurrent_dropout=0.3),
+    layers.Dense(64, activation="relu"),
+    layers.Dropout(0.5),
     layers.Dense(num_classes, activation="softmax")
 ])
 
 model.compile(optimizer="adam", loss="sparse_categorical_crossentropy", metrics=["accuracy"])
 
-# Training
+# Early stopping to prevent overfitting
+early_stop = keras.callbacks.EarlyStopping(
+    monitor="val_loss",
+    patience=5,
+    restore_best_weights=True
+)
+
+# Train model
 history = model.fit(
     X_train, y_train,
     epochs=50,
-    batch_size=64,
+    batch_size=32,
     validation_data=(X_val, y_val),
-    class_weight=class_weights
+    class_weight=class_weights,
+    callbacks=[early_stop],
+    verbose=1
 )
 
-# Evaluation
+# Evaluate on test data
 y_pred = np.argmax(model.predict(X_test), axis=1)
 
-print("Classification Report:")
+print("\nClassification Report:")
 print(classification_report(y_test, y_pred))
-print("Confusion Matrix:")
+print("\nConfusion Matrix:")
 print(confusion_matrix(y_test, y_pred))

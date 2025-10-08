@@ -3,20 +3,33 @@ from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import Conv1D, MaxPooling1D, LSTM, Dense, Dropout, Bidirectional
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, confusion_matrix
 from tensorflow.keras.callbacks import EarlyStopping
+from google.colab import drive
+import os
 
+# Mount Google Drive
+drive.mount('/content/drive')
+
+# Path to your KDD folder in Drive (change this path if your folder is elsewhere)
+base_path = '/content/drive/MyDrive/KDD'
+
+# Verify files exist
+for f in ['X_train.npy', 'y_train.npy', 'X_val.npy', 'y_val.npy', 'X_test.npy', 'y_test.npy']:
+    full_path = os.path.join(base_path, f)
+    if not os.path.exists(full_path):
+        print(f"⚠️ Missing file: {full_path}")
+
+# Early stopping
 early_stop = EarlyStopping(monitor='val_loss', patience=5, restore_best_weights=True)
 
-
 # Load preprocessed data
-X_train = np.load("../Preprocessing/KDD/X_train.npy")
-y_train = np.load("../Preprocessing/KDD/y_train.npy")
-X_val   = np.load("../Preprocessing/KDD/X_val.npy")
-y_val   = np.load("../Preprocessing/KDD/y_val.npy")
-X_test  = np.load("../Preprocessing/KDD/X_test.npy")
-y_test  = np.load("../Preprocessing/KDD/y_test.npy")
+X_train = np.load(os.path.join(base_path, "X_train.npy"))
+y_train = np.load(os.path.join(base_path, "y_train.npy"))
+X_val   = np.load(os.path.join(base_path, "X_val.npy"))
+y_val   = np.load(os.path.join(base_path, "y_val.npy"))
+X_test  = np.load(os.path.join(base_path, "X_test.npy"))
+y_test  = np.load(os.path.join(base_path, "y_test.npy"))
 
-
-# Expand dimensions if 2D
+# Expand dimensions if data is 2D
 if len(X_train.shape) == 2:
     X_train = np.expand_dims(X_train, axis=-1)
     X_val = np.expand_dims(X_val, axis=-1)
@@ -24,12 +37,13 @@ if len(X_train.shape) == 2:
     print("Expanded input shape to:", X_train.shape)
 
 # Build CNN + LSTM model
-model = Sequential()
-model.add(Conv1D(filters=64, kernel_size=3, activation='relu', input_shape=(X_train.shape[1], X_train.shape[2])))
-model.add(MaxPooling1D(pool_size=2))
-model.add(Bidirectional(LSTM(32)))
-model.add(Dropout(0.5))
-model.add(Dense(1, activation='sigmoid'))  # For binary classification
+model = Sequential([
+    Conv1D(filters=64, kernel_size=3, activation='relu', input_shape=(X_train.shape[1], X_train.shape[2])),
+    MaxPooling1D(pool_size=2),
+    Bidirectional(LSTM(32)),
+    Dropout(0.5),
+    Dense(1, activation='sigmoid')
+])
 
 # Compile model
 model.compile(optimizer='adam', loss='binary_crossentropy', metrics=['accuracy'])
@@ -41,14 +55,14 @@ history = model.fit(
     validation_data=(X_val, y_val),
     epochs=50,
     batch_size=64,
-    verbose=1, 
+    verbose=1,
     callbacks=[early_stop]
 )
 
 # Predict on test data
 y_pred = (model.predict(X_test) > 0.5).astype("int32")
 
-# Evaluate
+# Evaluate performance
 acc = accuracy_score(y_test, y_pred)
 prec = precision_score(y_test, y_pred)
 rec = recall_score(y_test, y_pred)

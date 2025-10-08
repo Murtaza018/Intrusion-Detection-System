@@ -1,0 +1,64 @@
+Phase 2: Model Evaluation Report
+1. Objective
+
+The goal of this phase was to train, test, and evaluate the machine learning model using the KDD dataset. The objective was to measure how accurately the model detects and classifies different types of network activities.
+
+2. Dataset Overview
+
+Dataset Used: KDD (Knowledge Discovery in Databases)
+
+Dataset Location: Google Drive (mounted in Colab)
+
+Dataset Description:
+The KDD dataset contains features extracted from network traffic data and is commonly used for Intrusion Detection Systems (IDS).
+It includes both normal and attack records, with multiple attack categories.
+
+3. Model Information
+
+Model Type: Supervised Machine Learning model
+
+Architecture: Neural Network / Dense layers
+
+Framework Used: TensorFlow / Keras
+
+Training Setup:
+
+Optimizer: Adam
+
+Loss Function: Categorical Crossentropy
+
+Epochs: (as per training code)
+
+Batch Size: (as per training code)
+
+4. Evaluation Metrics
+
+After training, the model was evaluated using the test data to measure its performance across different metrics.
+
+Metric	Score
+Accuracy	0.7422
+Precision	0.9181
+Recall	0.6007
+F1-Score	0.7262
+5. Confusion Matrix
+	Predicted Normal	Predicted Attack
+Actual Normal	9023	688
+Actual Attack	5124	7709
+
+Interpretation:
+
+The model correctly identified 9023 normal and 7709 attack instances.
+
+It misclassified 688 normal records as attacks (false positives).
+
+It misclassified 5124 attacks as normal (false negatives).
+
+6. Performance Analysis
+
+The model achieved a good precision (91.8%), meaning most of the detected attacks are truly attacks.
+
+The recall (60.07%) suggests that some attack samples were missed, which can be improved by tuning hyperparameters and balancing the dataset.
+
+The F1-score (72.62%) indicates a balanced trade-off between precision and recall.
+
+Overall accuracy (74.22%) shows solid performance but has room for improvement in correctly detecting more attack samples.

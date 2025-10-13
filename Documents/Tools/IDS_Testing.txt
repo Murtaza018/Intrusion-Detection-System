@@ -1,0 +1,41 @@
+You got it. For a complete and effective setup, here is the single best combination to choose.
+
+For building the IDS core, use Scapy. For simulating and testing, use GNS3 to create the network and Metasploit to generate attacks.
+
+
+## 🐍 For Your IDS Core: Scapy (Python)
+Scapy is the definitive choice for developing your IDS.
+
+Why it's the best choice: It's more than just a packet sniffer; it's a complete packet manipulation tool. You can use the same library to build your detection engine and to craft specific packets for unit-testing your detection rules. This versatility is unmatched. Since your IDS will have a custom logic backend, Scapy integrates perfectly into any Python application, allowing you to feed alerts to your Material UI front-end.
+
+
+## 🔬 For Your Testing Environment: GNS3 + Metasploit
+This combination gives you a professional-grade virtual lab to safely test your IDS against realistic threats.
+
+Network Simulator: GNS3
+
+Why it's the best choice: GNS3 allows you to build realistic network topologies using a drag-and-drop interface.  It seamlessly integrates with virtualization software like VirtualBox or VMware, so you can drop in full-fledged virtual machines to act as your attacker and victim. This is far more realistic than script-based simulators for testing a security tool.
+
+Attack Generation Tool: Metasploit Framework
+
+Why it's the best choice: Metasploit is the industry-standard tool for penetration testing. It contains a massive database of real-world exploits you can launch from your "attacker" VM against your "victim" VM. Testing against Metasploit will prove your IDS can handle actual attack techniques, not just theoretical ones.
+
+
+⭐ Your Recommended Workflow
+Here is how you'll put it all together:
+
+Build the Lab in GNS3: Create a simple network with three virtual machines:
+
+An Attacker VM (running a Linux distro like Kali Linux, which has Metasploit pre-installed).
+
+A Victim VM (running an intentionally vulnerable OS like Metasploitable2).
+
+Your IDS VM/Host where you run your Scapy script. Position this so it can monitor traffic between the attacker and the victim.
+
+Start Your IDS: Run your Python script using Scapy on the IDS machine to begin monitoring the virtual network.
+
+Launch Attacks: From the Kali Linux VM, use Metasploit to launch exploits against services running on the Metasploitable2 VM.
+
+Verify Detection: Watch your IDS. If it's working correctly, you should see alerts being generated in real-time as Metasploit's traffic crosses the network.
+
+Standardized Testing (Optional but Recommended): Use a tool called TCPreplay to replay pre-recorded attack traffic (.pcap files) through your GNS3 network to test specific, known signatures.

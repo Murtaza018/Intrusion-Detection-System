@@ -7,12 +7,22 @@
 
 import sys
 from datetime import datetime
-from scapy.all import sniff, IP, TCP, UDP, ICMP, get_if_list
+from scapy.all import sniff, IP, TCP, UDP, ICMP, Raw, get_if_list
 
 # --- Configuration ---
 # You can add IP addresses to a whitelist to prevent them from triggering alerts.
 IP_WHITELIST = ["127.0.0.1", "localhost"]
 PACKET_COUNT = 0
+
+# --- SQL Injection Signatures ---
+# A list of common, basic SQL injection patterns to look for.
+SQL_INJECTION_PATTERNS = [
+    "' OR '1'='1'",
+    "UNION SELECT",
+    "DROP TABLE",
+    "--",
+    "';"
+]
 
 
 def log_alert(message):
@@ -32,8 +42,8 @@ def packet_analysis_engine(packet):
     """
     global PACKET_COUNT
     PACKET_COUNT += 1
-    if PACKET_COUNT % 50 == 0:
-        # Print a status update every 50 packets to show the IDS is alive.
+    if PACKET_COUNT % 200 == 0:
+        # Print a status update every 200 packets to show the IDS is alive.
         print(f"[*] {PACKET_COUNT} packets captured...", end='\r')
 
     try:
@@ -60,6 +70,15 @@ def packet_analysis_engine(packet):
                 # This scan sets FIN, PSH, and URG flags, which is highly unusual.
                 if flags == 0x29:  # FIN/PSH/URG flags
                     log_alert(f"Possible Nmap Xmas Scan detected from {source_ip} to {dest_ip}:{dest_port}")
+
+                # --- NEW RULE: Basic SQL Injection Detection in HTTP ---
+                if dest_port == 80 and packet.haslayer(Raw):
+                    payload = packet[Raw].load.decode('utf-8', errors='ignore').upper()
+                    for pattern in SQL_INJECTION_PATTERNS:
+                        if pattern in payload:
+                            log_alert(f"Possible SQL Injection attempt detected from {source_ip} to {dest_ip}. Pattern: {pattern}")
+                            # Break after first match to avoid multiple alerts for one packet
+                            break
             
             # --- Rule 3: UDP Protocol Analysis ---
             elif packet.haslayer(UDP):
@@ -68,15 +87,17 @@ def packet_analysis_engine(packet):
                 
                 # Signature Rule: Detect potential DNS Zone Transfer attempt (AXFR)
                 # While often legitimate, unsolicited zone transfers can leak network info.
-                if dest_port == 53 and packet[UDP].qr == 0 and packet[UDP].opcode == 0 and b'axfr' in bytes(packet[UDP].payload).lower():
-                     log_alert(f"Potential DNS Zone Transfer attempt from {source_ip} to {dest_ip}")
+                if dest_port == 53 and packet.haslayer(Raw):
+                    payload = bytes(packet[Raw].load).lower()
+                    if b'axfr' in payload:
+                        log_alert(f"Potential DNS Zone Transfer attempt from {source_ip} to {dest_ip}")
 
 
             # --- Rule 4: ICMP Protocol Analysis (Ping) ---
             elif packet.haslayer(ICMP):
                 # Anomaly Rule: Detect "Ping of Death" attempt (oversized ICMP packet)
                 # A normal ping packet is small. A very large one can be malicious.
-                if len(packet[ICMP].payload) > 1024:
+                if len(packet[ICIP].payload) > 1024:
                     log_alert(f"Oversized ICMP (Ping) packet detected from {source_ip} to {dest_ip}. Potential Ping of Death.")
 
     except Exception as e:
@@ -133,7 +154,6 @@ if __name__ == "__main__":
                             connection_reg_path = fr'{reg_path}\{guid_with_braces}\Connection'
                             with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, connection_reg_path) as key:
                                 friendly_name, _ = winreg.QueryValueEx(key, 'Name')
-                                # **THE FIX**: Remove braces from the GUID before using it as a key.
                                 guid_without_braces = guid_with_braces.strip('{}')
                                 guid_to_friendly_name[guid_without_braces.upper()] = friendly_name
                         except FileNotFoundError:

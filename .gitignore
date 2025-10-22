@@ -21,3 +21,6 @@ dist/
 # Editor/IDE settings
 .vscode/
 .idea/
+
+# Ignore trained ML models
+*.keras

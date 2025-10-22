@@ -1,0 +1,107 @@
+📦Backend
+ ┣ 📂AI Model
+ ┃ ┣ 📂Adversarial Attack and Defense
+ ┃ ┃ ┣ 📂Adversarial_Samples
+ ┃ ┃ ┃ ┣ 📜X_adversarial.npy
+ ┃ ┃ ┃ ┗ 📜y_adversarial.npy
+ ┃ ┃ ┣ 📜cicids_spatiotemporal_model_hardened.keras
+ ┃ ┃ ┣ 📜phase01.py
+ ┃ ┃ ┗ 📜phase02.py
+ ┃ ┣ 📂Autoencoder
+ ┃ ┃ ┣ 📜cicids_autoencoder.keras
+ ┃ ┃ ┣ 📜Model.py
+ ┃ ┃ ┗ 📜next steps.txt
+ ┃ ┣ 📂CNN+LSTM
+ ┃ ┃ ┣ 📜cicids_spatiotemporal_model.keras
+ ┃ ┃ ┗ 📜Model.py
+ ┃ ┣ 📂DNN
+ ┃ ┃ ┣ 📜cicids_supervised_classifier.keras
+ ┃ ┃ ┗ 📜Model.py
+ ┃ ┣ 📂Model Statistics
+ ┃ ┃ ┣ 📜Autoencoder
+ ┃ ┃ ┗ 📜CNN+LSTM
+ ┃ ┣ 📂Preprocessing
+ ┃ ┃ ┣ 📂CIC-IDS-2017
+ ┃ ┃ ┃ ┣ 📂CIC-IDS-2017-Processed
+ ┃ ┃ ┃ ┃ ┣ 📜X_test.npy
+ ┃ ┃ ┃ ┃ ┣ 📜X_train.npy
+ ┃ ┃ ┃ ┃ ┣ 📜X_val.npy
+ ┃ ┃ ┃ ┃ ┣ 📜y_test.npy
+ ┃ ┃ ┃ ┃ ┣ 📜y_train.npy
+ ┃ ┃ ┃ ┃ ┗ 📜y_val.npy
+ ┃ ┃ ┃ ┗ 📜CIC_Preprocessing.py
+ ┃ ┃ ┣ 📂Datasets
+ ┃ ┃ ┃ ┣ 📂CIC-IDS-2017
+ ┃ ┃ ┃ ┃ ┣ 📜Friday-WorkingHours-Afternoon-DDos.pcap_ISCX.csv
+ ┃ ┃ ┃ ┃ ┣ 📜Friday-WorkingHours-Afternoon-PortScan.pcap_ISCX.csv
+ ┃ ┃ ┃ ┃ ┣ 📜Friday-WorkingHours-Morning.pcap_ISCX.csv
+ ┃ ┃ ┃ ┃ ┣ 📜MachineLearningCSV.zip
+ ┃ ┃ ┃ ┃ ┣ 📜Monday-WorkingHours.pcap_ISCX.csv
+ ┃ ┃ ┃ ┃ ┣ 📜Thursday-WorkingHours-Afternoon-Infilteration.pcap_ISCX.csv
+ ┃ ┃ ┃ ┃ ┣ 📜Thursday-WorkingHours-Morning-WebAttacks.pcap_ISCX.csv
+ ┃ ┃ ┃ ┃ ┣ 📜Tuesday-WorkingHours.pcap_ISCX.csv
+ ┃ ┃ ┃ ┃ ┗ 📜Wednesday-workingHours.pcap_ISCX.csv
+ ┃ ┃ ┃ ┣ 📂KDD
+ ┃ ┃ ┃ ┃ ┣ 📜KDDNames.txt
+ ┃ ┃ ┃ ┃ ┣ 📜KDDTest.txt
+ ┃ ┃ ┃ ┃ ┗ 📜KDDTrain.txt
+ ┃ ┃ ┃ ┗ 📂USBW
+ ┃ ┃ ┣ 📂KDD
+ ┃ ┃ ┃ ┣ 📜KDD_Preprocessing.py
+ ┃ ┃ ┃ ┣ 📜preprocessing_pipeline.pkl
+ ┃ ┃ ┃ ┣ 📜X_test.npy
+ ┃ ┃ ┃ ┣ 📜X_train.npy
+ ┃ ┃ ┃ ┣ 📜X_val.npy
+ ┃ ┃ ┃ ┣ 📜y_test.npy
+ ┃ ┃ ┃ ┣ 📜y_train.npy
+ ┃ ┃ ┃ ┗ 📜y_val.npy
+ ┃ ┃ ┗ 📂USBW
+ ┃ ┣ 📜pipeline.txt
+ ┃ ┗ 📜prediction.py
+ ┣ 📂Controllers
+ ┃ ┗ 📜UserController.py
+ ┣ 📂dbConnection
+ ┃ ┣ 📂__pycache__
+ ┃ ┃ ┗ 📜dbConnection.cpython-313.pyc
+ ┃ ┣ 📜dbConnection.py
+ ┃ ┗ 📜testConnection.py
+ ┣ 📂IDS Core
+ ┃ ┗ 📜main.py
+ ┣ 📂Models
+ ┃ ┣ 📜Alert.py
+ ┃ ┣ 📜Logs.py
+ ┃ ┣ 📜readme.txt
+ ┃ ┣ 📜Rule.py
+ ┃ ┣ 📜Traffic.py
+ ┃ ┗ 📜User.py
+ ┣ 📂Routes
+ ┃ ┗ 📜UserRoute.py
+ ┣ 📂Schemas
+ ┃ ┗ 📜UserSchema.py
+ ┣ 📂__pycache__
+ ┃ ┗ 📜main.cpython-313.pyc
+ ┗ 📜main.py
+ 📦Deploy
+ 📦Documents
+ ┣ 📂features
+ ┃ ┗ 📜feature1.txt
+ ┣ 📂File Structure
+ ┃ ┗ 📜file structure.txt
+ ┣ 📂papers
+ ┃ ┣ 📜paper1 summary.txt
+ ┃ ┣ 📜paper1.pdf
+ ┃ ┣ 📜paper3 summary.txt
+ ┃ ┣ 📜paper3.pdf
+ ┃ ┗ 📜research papers.txt
+ ┣ 📂roadmap
+ ┃ ┣ 📜AI model email.txt
+ ┃ ┣ 📜AI model roadmap.txt
+ ┃ ┣ 📜roadmap.txt
+ ┃ ┗ 📜step1 detailed.txt
+ ┣ 📂techStack
+ ┃ ┣ 📜moduleWiseStack.txt
+ ┃ ┗ 📜stack.txt
+ ┗ 📂Tools
+ ┃ ┗ 📜IDS_Testing.txt
+ 📦Frontend-Mobile
+ 📦Frontend-Web

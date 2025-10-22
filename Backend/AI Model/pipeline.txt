@@ -1,0 +1,8 @@
+Adversarial Attack and Defense->Autoencoder
+
+1-Adversarial Attack and Defense:hardened version of CNN+LTSM,it even predicts attacks that are designed to bypass AI based IDS.It has a 
+    low false positives(normals predicted as attacks) and low false negatives(attacks predicted as normals) rates making
+    it an efficient first line of defense.
+2-Autoencoder:It is used to detect zero-day attacks not because it predicts attacks better overall, but because its job is to spot anything that deviates from normal, 
+    even things it has never seen before. Its extreme sensitivity (which causes the high false positives) is exactly what makes it a good "safety net" for catching
+    novel threats that the DNN might miss.

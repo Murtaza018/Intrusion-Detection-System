@@ -24,3 +24,6 @@ dist/
 
 # Ignore trained ML models
 *.keras
+
+# Ignore cryptographic private keys and build artifacts
+*.pem

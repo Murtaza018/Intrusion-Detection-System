@@ -1,0 +1,30 @@
+Phase 1: Backend Development (Python)
+Step 1: Build a Basic API Endpoint with Flask
+Goal: Create a simple web server that can send (or "serve") your IDS alerts as JSON data. We'll use Flask, a lightweight Python web framework.
+
+Action: We'll write a Python script that runs a Flask server with a single endpoint, like /api/alerts, which will return a list of mock alert data.
+
+Step 2: Generate a Self-Signed ECC Certificate
+Goal: Create the "lock and key" for our HTTPS server. Since we are in development, we'll create our own (a "self-signed" certificate) using ECC.
+
+Action: We'll use a single command-line tool (openssl) to generate two files: cert.pem (the public certificate, or "lock") and key.pem (the private key, or "key").
+
+Step 3: Enable HTTPS on the Flask Server
+Goal: Tell our Flask server from Step 1 to use the certificate and key from Step 2. This turns our server from an insecure http:// server to a secure https:// server.
+
+Action: We'll add one line of code to our Flask script, telling it to use the cert.pem and key.pem files for its SSL/TLS context.
+
+Phase 2: Mobile App Integration (Concept)
+Step 4: Configure the App to Trust the Certificate
+Goal: By default, the mobile app will reject our self-signed certificate because it's not from a public authority. We need to tell the app to make an exception and trust this specific certificate.
+
+Action (Conceptual): In the mobile app's code, we would "pin" our cert.pem file. This tells the app, "Only accept connections that are encrypted with this exact certificate," which provides a very high level of security.
+
+Step 5: Implement API Key Authentication
+Goal: Encrypting the connection is not enough; we also need to authenticate it. We must ensure that only our mobile app can request data from our backend.
+
+Action:
+
+Backend: We'll update the Flask server to require a secret "API Key" in the request headers. If the key is missing or wrong, the server will reject the request.
+
+Mobile App (Conceptual): The app would be programmed to store this secret key and include it with every API request it makes.

@@ -1,17 +1,20 @@
 # ids_backend.py
-# This script now implements Step 3 of our roadmap.
-# We are enabling SSL/TLS (HTTPS) on our Flask server
-# using the ECC certificate and key we generated.
+# This script now implements Step 5: API Key Authentication.
+# The channel is already encrypted (HTTPS), and now we add a check
+# to ensure that only clients with a secret key can access the data.
 
-from flask import Flask, jsonify
+from flask import Flask, jsonify, request
 from datetime import datetime, timedelta
-import ssl  # <-- We import the ssl module
+import ssl
 
-# Initialize the Flask application
+# --- Configuration ---
 app = Flask(__name__)
+# THIS IS YOUR SECRET KEY.
+# In a real app, this would be stored securely (e.g., in an environment variable).
+# The mobile app must also have this key.
+SECRET_API_KEY = "MySuperSecretKey12345!"
 
 # --- Mock Data ---
-# This remains the same as before.
 mock_alerts = [
     {
         "id": "1a2b3c",
@@ -33,40 +36,48 @@ mock_alerts = [
     }
 ]
 
-# --- API Endpoint Definition ---
-# The endpoint logic is exactly the same.
+# --- API Endpoint Definition (Now with Security) ---
 @app.route("/api/alerts", methods=["GET"])
 def get_alerts():
     """
     This function is called when a user makes a GET request
     to the /api/alerts endpoint.
+    It now checks for a valid API key.
     """
-    print("[LOG] /api/alerts endpoint was accessed.")
-    return jsonify(mock_alerts)
-
-# --- Run the Server (Now with HTTPS) ---
-if __name__ == "__main__":
-    print("--- Starting Secure IDS Backend Server (HTTPS) ---")
     
     # ** THE UPGRADE **
-    # We define the 'ssl_context' to point to our generated
-    # certificate and private key.
-    # Flask will automatically use these to serve traffic over HTTPS.
+    # Check if the 'X-API-Key' header was sent in the request.
+    provided_key = request.headers.get("X-API-Key")
+    
+    if not provided_key or provided_key != SECRET_API_KEY:
+        # If the key is missing or incorrect, deny access.
+        print(f"[LOG] Failed API access attempt. Key: {provided_key}")
+        # '401 Unauthorized' is the standard HTTP error for this.
+        return jsonify({"error": "Unauthorized"}), 401
+    
+    # If the key is correct, proceed as normal.
+    print("[LOG] Successful API access. /api/alerts endpoint was accessed.")
+    return jsonify(mock_alerts)
+
+# --- Run the Server (Still with HTTPS) ---
+if __name__ == "__main__":
+    print("--- Starting Secure IDS Backend Server (HTTPS + API Key) ---")
+    
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     try:
         context.load_cert_chain('cert.pem', 'key.pem')
     except FileNotFoundError:
         print("\n[!] Error: 'cert.pem' or 'key.pem' not found.")
-        print("[!] Please make sure you have run the 'openssl' commands to generate them first.")
+        print("[!] Please make sure they are in the same folder.")
         exit()
 
-    print("[*] To test, open your browser and go to: https://127.0.0.1:5000/api/alerts")
-    print("[!] Your browser will show a security warning. This is NORMAL.")
-    print("[!] Click 'Advanced' and 'Proceed to 127.0.0.1' to accept your self-signed certificate.")
+    print("[*] Server is running on: https://127.0.0.1:5000/api/alerts")
+    print("[!] Test with a tool like Postman or curl, as your browser can't easily send the 'X-API-Key' header.")
     
     app.run(
         debug=True,
         host='0.0.0.0',
         port=5000,
-        ssl_context=context  # <-- This is the line that enables HTTPS
+        ssl_context=context
     )
+

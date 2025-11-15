@@ -1,0 +1,29 @@
+{
+  "High_Traffic_Volume": [
+    "Flow_Pkts/s",
+    "Fwd_Pkts/s",
+    "Bwd_Pkts/s",
+    "TotLen_Fwd_Pkts",
+    "TotLen_Bwd_Pkts"
+  ],
+  "Many_Dest_Ports": [
+    "Dst_Ports_Count",
+    "Dst_Port"
+  ],
+  "Long_Lived_Connections": [
+    "Flow_Duration"
+  ],
+  "Suspicious_DNS_Behavior": [
+    "DNS_Query_Length",
+    "DNS_Qry_Name_Len"
+  ],
+  "Web_Attack_Patterns": [
+    "Http_Method",
+    "Insecure_Headers",
+    "Payload_Size"
+  ],
+  "Brute_Force_Patterns": [
+    "Failed_Logins",
+    "Login_Attempts"
+  ]
+}

@@ -1,29 +1,57 @@
 {
   "High_Traffic_Volume": [
-    "Flow_Pkts/s",
-    "Fwd_Pkts/s",
-    "Bwd_Pkts/s",
-    "TotLen_Fwd_Pkts",
-    "TotLen_Bwd_Pkts"
+    "Flow Pkts/s",
+    "Fwd Pkts/s",
+    "Bwd Pkts/s",
+    "Total Fwd Pkts",
+    "Total Bwd Pkts",
+    "Subflow Fwd Pkts",
+    "Subflow Bwd Pkts"
   ],
-  "Many_Dest_Ports": [
-    "Dst_Ports_Count",
-    "Dst_Port"
+  "Large_Data_Transfer": [
+    "Flow IAT Mean",
+    "Flow IAT Max",
+    "Fwd IAT Total",
+    "Bwd IAT Total",
+    "Total Length of Fwd Pkts",
+    "Total Length of Bwd Pkts",
+    "Subflow Fwd Byts",
+    "Subflow Bwd Byts"
   ],
-  "Long_Lived_Connections": [
-    "Flow_Duration"
+  "Long_Lived_Connections": ["Flow Duration", "Fwd IAT Max", "Bwd IAT Max"],
+  "Packet_Size_Anomalies": [
+    "Fwd Pkt Len Max",
+    "Fwd Pkt Len Min",
+    "Fwd Pkt Len Mean",
+    "Bwd Pkt Len Max",
+    "Bwd Pkt Len Min",
+    "Bwd Pkt Len Mean",
+    "Pkt Len Max",
+    "Pkt Len Mean",
+    "Pkt Len Std",
+    "Pkt Len Var"
   ],
-  "Suspicious_DNS_Behavior": [
-    "DNS_Query_Length",
-    "DNS_Qry_Name_Len"
+  "Flag_Manipulation": [
+    "Fwd PSH Flags",
+    "Bwd PSH Flags",
+    "Fwd URG Flags",
+    "Bwd URG Flags",
+    "FIN Flag Count",
+    "SYN Flag Count",
+    "RST Flag Count",
+    "PSH Flag Count",
+    "ACK Flag Count",
+    "URG Flag Count",
+    "CWE Flag Count",
+    "ECE Flag Count"
   ],
-  "Web_Attack_Patterns": [
-    "Http_Method",
-    "Insecure_Headers",
-    "Payload_Size"
-  ],
-  "Brute_Force_Patterns": [
-    "Failed_Logins",
-    "Login_Attempts"
+  "Connection_Setup_Issues": [
+    "Down/Up Ratio",
+    "Init Fwd Win Byts",
+    "Init Bwd Win Byts",
+    "Active Mean",
+    "Active Std",
+    "Idle Mean",
+    "Idle Std"
   ]
 }

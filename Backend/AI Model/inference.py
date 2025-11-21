@@ -5,81 +5,95 @@ from tensorflow import keras
 # ---------------------------------------------------------
 # Path setup
 # ---------------------------------------------------------
-# This file lives in: Backend/AI Model/inference.py
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))  # .../Backend/AI Model
+# Assumes this file is in: Backend/AI Model/
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-# Model files are stored in subfolders of this directory:
-#   Backend/AI Model/DNN/
-#   Backend/AI Model/CNN+LSTM/
-#   Backend/AI Model/Adversarial Attack and Defense/
-#   Backend/AI Model/Autoencoder/
-#
-# Using BASE_DIR makes paths work no matter where you run Python from.
+# We only keep the two essential models for the final pipeline.
 MODEL_PATHS = {
-    "dnn": os.path.join(
-        BASE_DIR, "DNN", "cicids_supervised_classifier.keras"
+    # 1. The Frontline Defense (Hardened Spatio-Temporal Model)
+    # Note: Ensure the .keras file is moved to this folder or update the path below.
+    "hardened_classifier": os.path.join(
+        BASE_DIR, "Adversarial Attack and Defense", "cicids_spatiotemporal_model_hardened.keras"
     ),
-    "cnn_lstm": os.path.join(
-        BASE_DIR, "CNN+LSTM", "cicids_spatiotemporal_model.keras"
-    ),
-    "cnn_lstm_hardened": os.path.join(
-        BASE_DIR, "CNN+LSTM",
-        "cicids_spatiotemporal_model_hardened.keras"
-    ),
-    "autoencoder": os.path.join(
+    
+    # 2. The Zero-Day Hunter (Autoencoder)
+    "zero_day_hunter": os.path.join(
         BASE_DIR, "Autoencoder", "cicids_autoencoder.keras"
     ),
 }
 
-# Cache loaded models so we don't reload from disk every time
-_LOADED_MODELS = {}
+# Threshold for the Autoencoder (from your training results)
+AUTOENCODER_THRESHOLD = 0.0001
 
+# Cache loaded models
+_LOADED_MODELS = {}
 
 def load_model(model_key: str):
     """
     Load (or retrieve cached) Keras model for the given key.
-    model_key must be one of MODEL_PATHS keys.
     """
     if model_key not in MODEL_PATHS:
-        raise ValueError(f"Unknown model_key: {model_key}")
+        raise ValueError(f"Unknown model_key: {model_key}. Available: {list(MODEL_PATHS.keys())}")
 
     if model_key not in _LOADED_MODELS:
         path = MODEL_PATHS[model_key]
         if not os.path.exists(path):
             raise FileNotFoundError(f"Model file not found at {path}")
-        _LOADED_MODELS[model_key] = keras.models.load_model(path)
+        
+        print(f"[*] Loading model '{model_key}' from disk...")
+        # compile=False makes loading faster since we only need inference, not training
+        _LOADED_MODELS[model_key] = keras.models.load_model(path, compile=False)
+        
     return _LOADED_MODELS[model_key]
 
 def _prepare_input(sample: np.ndarray, model_key: str) -> np.ndarray:
     """
-    Prepare input shape for different model types.
-    - DNN / autoencoder: (1, n_features)
-    - CNN+LSTM variants: (1, n_features, 1)
+    Prepare input shape based on specific model requirements.
     """
     x = np.asarray(sample, dtype=float)
 
-    if model_key in ["cnn_lstm", "cnn_lstm_hardened"]:
-        # CNN+LSTM expects (batch, timesteps, channels)
+    # The Hardened CNN+LSTM expects 3D input: (batch, features, 1)
+    if model_key == "hardened_classifier":
         x = x.reshape(1, -1, 1)
-    else:
+    
+    # The Autoencoder expects 2D input: (batch, features)
+    elif model_key == "zero_day_hunter":
         x = x.reshape(1, -1)
 
     return x
 
 def predict(sample: np.ndarray, model_key: str):
     """
-    sample: 1D numpy array of features (already preprocessed, correct order).
-    returns: dict with label, score, model_key
+    Run inference on a single sample.
+    Handles logic differences between Classifier (Probability) and Autoencoder (Reconstruction Error).
     """
     model = load_model(model_key)
     x = _prepare_input(sample, model_key)
 
-    proba = float(model.predict(x, verbose=0)[0][0])
-    label = "Attack" if proba >= 0.5 else "Normal"
+    # --- Logic for Frontline Defense (Classifier) ---
+    if model_key == "hardened_classifier":
+        # Output is a probability (0 to 1)
+        proba = float(model.predict(x, verbose=0)[0][0])
+        label = "Attack" if proba >= 0.5 else "Normal"
+        return {
+            "label": label,
+            "score": proba, # Confidence score
+            "type": "classifier_result"
+        }
 
-    return {
-        "label": label,
-        "score": proba,
-        "model": model_key,
-    }
-
+    # --- Logic for Zero-Day Hunter (Autoencoder) ---
+    elif model_key == "zero_day_hunter":
+        # Output is a reconstruction of the input
+        reconstruction = model.predict(x, verbose=0)
+        # Calculate Mean Absolute Error between Input and Reconstruction
+        error = np.mean(np.abs(x - reconstruction))
+        
+        is_anomaly = error > AUTOENCODER_THRESHOLD
+        label = "Anomaly (Zero-Day)" if is_anomaly else "Normal"
+        
+        return {
+            "label": label,
+            "score": float(error), # Reconstruction error
+            "threshold": AUTOENCODER_THRESHOLD,
+            "type": "anomaly_result"
+        }

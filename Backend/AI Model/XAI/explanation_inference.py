@@ -25,20 +25,23 @@ def explain_alert(sample, model_key: str, attack_type: str = "Attack", meta: Dic
       4) Generate human-readable explanation text
 
     sample: 1D feature vector (numpy-like)
-    model_key: which IDS model raised this alert (e.g., "cnn_lstm")
+    model_key: which IDS model raised this alert (e.g., "hardened_classifier")
     attack_type: detected label (e.g., "DDoS", "PortScan", "Normal")
     meta: optional extra context in future (src_ip, dst_ip, etc.)
 
-    returns: dict with facts + "explanation" string
+    returns: dict with "facts" (dict) and "explanation" (str)
     """
     # 1) Local explanation with SHAP
+    # Note: We define top_k=6 features to keep the explanation focused
     top_feats = explain_with_shap(sample, model_key, top_k=6)
 
     # 2) Concept-level mapping
+    # Maps raw features (e.g., 'Flow Duration') to concepts (e.g., 'Long_Lived_Connections')
     top_concepts = map_top_features_to_concepts(top_feats)
 
     # 3) Context: where in the network
-    where = guess_where()  # later: use meta to refine (e.g. subnet, host group)
+    # Currently a placeholder, but could use 'meta' to say "Finance Server" etc.
+    where = guess_where() 
 
     facts = {
         "attack_type": attack_type,
@@ -47,7 +50,10 @@ def explain_alert(sample, model_key: str, attack_type: str = "Attack", meta: Dic
         "top_features": top_feats,
     }
 
-    # 4) Narrative explanation for non-technical users
-    explanation = render_explanation(facts)
-    facts["explanation"] = explanation
-    return facts
+    # 4) Render text
+    text = render_explanation(facts)
+
+    return {
+        "facts": facts,
+        "explanation": text
+    }

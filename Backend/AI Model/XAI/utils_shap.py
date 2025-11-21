@@ -3,6 +3,7 @@ import sys
 import json
 import numpy as np
 import shap
+import tensorflow as tf
 
 # ----- Path setup -----
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))      # .../Backend/AI Model/XAI
@@ -12,7 +13,6 @@ AI_MODEL_DIR = os.path.dirname(BASE_DIR)                   # .../Backend/AI Mode
 if AI_MODEL_DIR not in sys.path:
     sys.path.insert(0, AI_MODEL_DIR)
 
-# Make sure this XAI folder is also on the path for cross-imports if needed
 if BASE_DIR not in sys.path:
     sys.path.insert(0, BASE_DIR)
 
@@ -32,36 +32,41 @@ if not os.path.exists(BACKGROUND_PATH):
 
 BACKGROUND = np.load(BACKGROUND_PATH)
 
-# One explainer per model_key, cached
+# One explainer per model
 _EXPLAINERS = {}
 
-
-def _make_kernel_explainer(model_key: str):
-    """
-    Create a SHAP KernelExplainer for the given model.
-    Assumes the model outputs a single probability for 'Attack'
-    or can be reshaped to (batch,).
-    """
+def _make_kernel_explainer(model_key):
     model = load_model(model_key)
 
+    # Prediction function wrapper for SHAP
     def f(X):
-        # X: (n_samples, n_features)
-        import tensorflow as tf
-
-        X = np.asarray(X, dtype=float)
-        if model_key in ["cnn_lstm", "cnn_lstm_hardened"]:
-            # reshape to (batch, timesteps, channels) for CNN+LSTM
+        # Check if model expects 3D input (CNN+LSTM) or 2D (Autoencoder/DNN)
+        if model_key in ["hardened_classifier", "cnn_lstm", "cnn_lstm_hardened"]:
+            # Reshape to (batch, features, 1)
             X_tf = tf.convert_to_tensor(
                 X.reshape(X.shape[0], X.shape[1], 1),
                 dtype=tf.float32
             )
         else:
+            # Autoencoder/DNN expects 2D
             X_tf = tf.convert_to_tensor(X, dtype=tf.float32)
 
-        preds = model(X_tf, training=False).numpy().reshape(-1)
+        # Get predictions
+        preds = model(X_tf, training=False).numpy()
+        
+        # If it's the classifier, we want the probability (index 0 if output is shape (N,1))
+        if preds.shape[1] == 1:
+            return preds.reshape(-1)
+        
+        # If it's the autoencoder, SHAP usually explains reconstruction error.
+        # This is complex for KernelExplainer. For simplicity, we might just explain
+        # the reconstruction of the *features themselves*, but standard SHAP
+        # on autoencoders for anomaly detection often requires a custom wrapper
+        # that calculates Mean Absolute Error.
+        # For now, let's assume this is mostly for the Classifier.
         return preds
 
-    # Keep SHAP background small to avoid OOM
+    # Keep SHAP background small to avoid OOM (Out of Memory)
     bg = BACKGROUND
     if bg.shape[0] > 50:
         bg = bg[:50]
@@ -71,6 +76,7 @@ def _make_kernel_explainer(model_key: str):
 
 def get_explainer(model_key: str):
     if model_key not in _EXPLAINERS:
+        print(f"[*] Initializing SHAP explainer for {model_key}...")
         _EXPLAINERS[model_key] = _make_kernel_explainer(model_key)
     return _EXPLAINERS[model_key]
 
@@ -80,22 +86,29 @@ def explain_with_shap(sample: np.ndarray, model_key: str, top_k: int = 6):
     sample: 1D numpy array matching FEATURE_NAMES order.
     returns: list[{feature, shap_value}] for top_k features by |shap_value|.
     """
+    # SHAP expects 2D input (1 sample)
     x = np.asarray(sample, dtype=float).reshape(1, -1)
 
     explainer = get_explainer(model_key)
 
     # Limit nsamples so SHAP doesn't try huge batches (prevents OOM)
+    # nsamples='auto' is usually fine, but a fixed number is safer for speed.
     shap_values = explainer.shap_values(x, nsamples=100)
 
-    # shap_values may be [class0, class1]; assume last index = Attack
+    # KernelExplainer returns a list for each output. 
+    # Our classifier has 1 output, so we take index 0.
     if isinstance(shap_values, list):
-        sv = np.array(shap_values[-1][0])
+        vals = shap_values[0][0] 
     else:
-        sv = np.array(shap_values[0])
+        vals = shap_values[0]
 
-    feats = [
-        {"feature": name, "shap_value": float(val)}
-        for name, val in zip(FEATURE_NAMES, sv)
-    ]
-    feats_sorted = sorted(feats, key=lambda v: abs(v["shap_value"]), reverse=True)
-    return feats_sorted[:top_k]
+    # Create list of dicts: {"feature": name, "shap_value": val}
+    explanations = []
+    for i, val in enumerate(vals):
+        feat_name = FEATURE_NAMES[i] if i < len(FEATURE_NAMES) else f"Feature {i}"
+        explanations.append({"feature": feat_name, "shap_value": float(val)})
+
+    # Sort by absolute impact (magnitude)
+    explanations.sort(key=lambda k: abs(k["shap_value"]), reverse=True)
+
+    return explanations[:top_k]

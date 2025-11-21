@@ -44,16 +44,23 @@ print("True label:", true_label)
 # ---------------------------------------------------
 # Predict using your real model
 # ---------------------------------------------------
-pred = predict(sample, "cnn_lstm_hardened")
+# ** THE FIX: Use the correct key 'hardened_classifier' **
+pred = predict(sample, "hardened_classifier")
 print("Predicted:", pred)
 
 # ---------------------------------------------------
 # XAI Explanation
 # ---------------------------------------------------
-facts = explain_alert(sample, "cnn_lstm_hardened", attack_type=pred["label"])
-
-print("\n==================== EXPLANATION ====================\n")
-print(facts["explanation"])
-
-print("\nTop Concepts:", facts["top_concepts"])
-print("Top Features:", facts["top_features"])
+# Only explain if it was detected as an attack (which we expect)
+if pred["label"] == "Attack":
+    print("\n--- Generating Explanation ---")
+    # We pass the same model key here
+    explanation = explain_alert(sample, "hardened_classifier", attack_type="Attack")
+    
+    print("\n[FACTS]")
+    print(explanation["facts"])
+    
+    print("\n[EXPLANATION TEXT]")
+    print(explanation["explanation"])
+else:
+    print("Prediction was Normal, so skipping explanation.")

@@ -1,0 +1,5 @@
+1-Add an option for analyst [x] Enable Synthetic Expansion (Jittering).(crucial for CGAN)
+2-Add an option for analyst to add new labels for a specific new zero day attack.(crucial for CGAN)
+3-add an option for analyst to select multiple packets while adding them to a new label.(crucial for CGAN)
+4-when the zero day attack packets are submitted to a new label,the app passes them through AE which checks Infilteration
+    they are all related to each other or not.

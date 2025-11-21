@@ -1,0 +1,4 @@
+when the analyst wants to fine tune the main model,they will select multiple packets which will then go to main model(adversarial)
+which will then see if the given packets are similar or not,if not similar,give error,if similar,proceed to cgan data generation,
+if the data packets are below a certain threshold,we will perform jittering(to create more packets from a few by slightly changing some values)
+after this,the packets go into cgan for data generation which will be used to fine tune main model.

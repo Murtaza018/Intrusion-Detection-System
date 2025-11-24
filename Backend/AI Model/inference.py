@@ -23,7 +23,7 @@ MODEL_PATHS = {
 }
 
 # Threshold for the Autoencoder (from your training results)
-AUTOENCODER_THRESHOLD = 0.0001
+AUTOENCODER_THRESHOLD = 0.01
 
 # Cache loaded models
 _LOADED_MODELS = {}
@@ -86,7 +86,8 @@ def predict(sample: np.ndarray, model_key: str):
         # Output is a reconstruction of the input
         reconstruction = model.predict(x, verbose=0)
         # Calculate Mean Absolute Error between Input and Reconstruction
-        error = np.mean(np.abs(x - reconstruction))
+        error = np.mean((x - reconstruction) ** 2)
+
         
         is_anomaly = error > AUTOENCODER_THRESHOLD
         label = "Anomaly (Zero-Day)" if is_anomaly else "Normal"

@@ -93,20 +93,34 @@ def explain_with_shap(sample: np.ndarray, model_key: str, top_k: int = 6):
 
     # Limit nsamples so SHAP doesn't try huge batches (prevents OOM)
     # nsamples='auto' is usually fine, but a fixed number is safer for speed.
-    shap_values = explainer.shap_values(x, nsamples=100)
+    shap_values = explainer.shap_values(x)
 
     # KernelExplainer returns a list for each output. 
     # Our classifier has 1 output, so we take index 0.
     if isinstance(shap_values, list):
-        vals = shap_values[0][0] 
+        arr = shap_values[0]
     else:
-        vals = shap_values[0]
+        arr = shap_values
 
-    # Create list of dicts: {"feature": name, "shap_value": val}
+    # arr may be (1, F) or (F,)
+    if arr.ndim == 2:
+        vals = arr[0]        # take first sample
+    else:
+        vals = arr
+
+
+        # Create list of dicts: {"feature": name, "shap_value": val}
     explanations = []
     for i, val in enumerate(vals):
         feat_name = FEATURE_NAMES[i] if i < len(FEATURE_NAMES) else f"Feature {i}"
-        explanations.append({"feature": feat_name, "shap_value": float(val)})
+
+        # FIX: If autoencoder SHAP returns vectors, reduce to scalar
+        if isinstance(val, (list, np.ndarray)):
+            scalar_val = float(np.mean(np.abs(val)))
+        else:
+            scalar_val = float(val)
+
+        explanations.append({"feature": feat_name, "shap_value": scalar_val})
 
     # Sort by absolute impact (magnitude)
     explanations.sort(key=lambda k: abs(k["shap_value"]), reverse=True)

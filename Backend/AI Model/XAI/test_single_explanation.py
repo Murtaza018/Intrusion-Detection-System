@@ -5,35 +5,57 @@ import numpy as np
 # ---------------------------------------------------
 # FIX PYTHON PATHS (IMPORTANT)
 # ---------------------------------------------------
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))          # XAI folder
-AI_MODEL_DIR = os.path.dirname(BASE_DIR)                       # Backend/AI Model
+# Get the directory where this script is located (Backend/AI Model/XAI)
+CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+# Get the parent directory (Backend/AI Model)
+AI_MODEL_DIR = os.path.dirname(CURRENT_DIR)
 
-# Add both paths to sys.path so imports work
+# Add these paths to sys.path so Python can find the modules
+if CURRENT_DIR not in sys.path:
+    sys.path.insert(0, CURRENT_DIR)
 if AI_MODEL_DIR not in sys.path:
     sys.path.insert(0, AI_MODEL_DIR)
 
-if BASE_DIR not in sys.path:
-    sys.path.insert(0, BASE_DIR)
-
 # Now imports will work
-from inference import predict
-from explanation_inference import explain_alert
+# We import from the filename (explanation_inference) directly
+try:
+    from inference import predict
+    from explanation_inference import explain_alert
+except ImportError as e:
+    print(f"[!] Import Error: {e}")
+    print(f"    Current Dir: {CURRENT_DIR}")
+    print(f"    AI Model Dir: {AI_MODEL_DIR}")
+    sys.exit(1)
 
 # ---------------------------------------------------
 # Load test data
 # ---------------------------------------------------
 DATA_PATH = os.path.join(
     AI_MODEL_DIR,
-    "Preprocessing", "CIC-IDS-2017", "CIC-IDS-2017-Processed"
+    "Preprocessing", "CIC-IDS-2017-Processed" # UPDATED PATH based on your logs
 )
 
-X = np.load(os.path.join(DATA_PATH, "X_test.npy"))
-y = np.load(os.path.join(DATA_PATH, "y_test.npy"))
+# Fallback if folder name is different
+if not os.path.exists(DATA_PATH):
+    DATA_PATH = os.path.join(
+        AI_MODEL_DIR,
+        "Preprocessing", "CIC-IDS-2017", "CIC-IDS-2017-Processed"
+    )
+
+try:
+    X = np.load(os.path.join(DATA_PATH, "X_test.npy"))
+    y = np.load(os.path.join(DATA_PATH, "y_test.npy"))
+except FileNotFoundError:
+    print(f"[!] Error: Could not find test data at '{DATA_PATH}'")
+    sys.exit(1)
 
 # pick an ATTACK sample
 attack_indices = np.where(y == 1)[0]
-sample_index = int(attack_indices[0])  # use the first attack; you can change later
+if len(attack_indices) == 0:
+    print("[!] No attack samples found in test data.")
+    sys.exit(1)
 
+sample_index = int(attack_indices[0])
 sample = X[sample_index]
 true_label = y[sample_index]
 
@@ -44,23 +66,25 @@ print("True label:", true_label)
 # ---------------------------------------------------
 # Predict using your real model
 # ---------------------------------------------------
-# ** THE FIX: Use the correct key 'hardened_classifier' **
-pred = predict(sample, "hardened_classifier")
-print("Predicted:", pred)
+try:
+    # ** THE FIX: Use the correct key 'hardened_classifier' **
+    pred = predict(sample, "hardened_classifier")
+    print("Predicted:", pred)
+except ValueError as e:
+    print(f"[!] Prediction Error: {e}")
+    sys.exit(1)
 
 # ---------------------------------------------------
 # XAI Explanation
 # ---------------------------------------------------
-# Only explain if it was detected as an attack (which we expect)
 if pred["label"] == "Attack":
     print("\n--- Generating Explanation ---")
-    # We pass the same model key here
     explanation = explain_alert(sample, "hardened_classifier", attack_type="Attack")
     
     print("\n[FACTS]")
-    print(explanation["facts"])
+    print(explanation.get("facts", "No facts returned"))
     
     print("\n[EXPLANATION TEXT]")
-    print(explanation["explanation"])
+    print(explanation.get("explanation", "No explanation text returned"))
 else:
     print("Prediction was Normal, so skipping explanation.")

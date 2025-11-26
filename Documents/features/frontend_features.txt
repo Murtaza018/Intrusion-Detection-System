@@ -3,3 +3,49 @@
 3-add an option for analyst to select multiple packets while adding them to a new label.(crucial for CGAN)
 4-when the zero day attack packets are submitted to a new label,the app passes them through AE which checks Infilteration
     they are all related to each other or not.
+5-give the analyst option to set the pipeline threshold themselves
+
+1. Detection Sensitivity Preset
+"Choose from pre-configured sensitivity levels: Low for reduced false alarms, Medium for balanced detection, or High for maximum threat visibility during investigations."
+
+2. Zero-Day Hunter Sensitivity Slider
+"Adjust how sensitive the AI is to unknown attacks. Lower values catch more subtle anomalies but may increase false alerts. Higher values only flag major deviations."
+
+3. Known Attack Confidence Threshold
+"Set the minimum confidence level required to flag known attack patterns. Lower values detect more potential threats, higher values only alert on high-confidence matches."
+
+4. Alert Volume Control
+"Control how chatty the system is: Quiet mode for critical alerts only, Normal for balanced reporting, or Verbose for maximum visibility during incident response."
+
+5. Operational Mode Selector
+"Switch between pre-tuned modes: Business Hours for normal operation, Night Mode for reduced alerts, Incident Response for maximum detection, or Pentest mode for security testing."
+
+6. Advanced Autoencoder Settings Panel
+"Fine-tune the statistical engine: adjust how many standard deviations from normal trigger alerts, what percentile of normal traffic sets the baseline, and how much learning data is required."
+
+7. Time-Based Auto-Adjustment Toggle
+"Automatically lower sensitivity during business hours when traffic is expected, and raise it at night when any activity is more suspicious."
+
+8. Threshold Profile Manager
+"Save and load your favorite threshold combinations for different scenarios - create profiles for 'Quiet Nights', 'Active Monitoring', or 'Security Audits'."
+
+9. Live Threshold Visualization
+"See real-time graphs showing current traffic patterns against your detection thresholds - watch how normal traffic behaves and where anomalies appear."
+
+10. One-Click Threshold Deployment
+"Apply new sensitivity settings immediately without restarting the detection pipeline - see changes take effect in real-time."
+
+11. Factory Reset Button
+"Instantly restore all thresholds to safe default values with a single click if you've made things too sensitive or missed something important."
+
+12. Impact Preview Display
+"See how your current threshold settings would have classified recent network traffic - understand the trade-off between detection and false alarms before committing."
+
+13. Analyst Notes Field
+"Add comments to your threshold profiles explaining why you chose these settings - perfect for team handovers or compliance documentation."
+
+14. Threshold History Timeline
+"Review how your sensitivity settings have evolved over time and which configurations worked best during past security incidents."
+
+15. Export Threshold Settings
+"Share your finely-tuned detection profiles with other team members or backup your optimal configurations for disaster recovery."

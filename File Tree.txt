@@ -37,6 +37,7 @@
  ┃ ┃ ┃ ┃ ┗ 📜cgan_preprocessing.py
  ┃ ┃ ┃ ┣ 📂CIC-IDS-2017
  ┃ ┃ ┃ ┃ ┣ 📂CIC-IDS-2017-Processed
+ ┃ ┃ ┃ ┃ ┃ ┣ 📜make_minimax.py
  ┃ ┃ ┃ ┃ ┃ ┣ 📜X_test.npy
  ┃ ┃ ┃ ┃ ┃ ┣ 📜X_train.npy
  ┃ ┃ ┃ ┃ ┃ ┣ 📜X_val.npy
@@ -70,6 +71,12 @@
  ┃ ┃ ┃ ┃ ┣ 📜y_train.npy
  ┃ ┃ ┃ ┃ ┗ 📜y_val.npy
  ┃ ┃ ┣ 📂XAI
+ ┃ ┃ ┃ ┣ 📂__pycache__
+ ┃ ┃ ┃ ┃ ┣ 📜build_xai_dataset.cpython-313.pyc
+ ┃ ┃ ┃ ┃ ┣ 📜explanation_inference.cpython-313.pyc
+ ┃ ┃ ┃ ┃ ┣ 📜templates.cpython-313.pyc
+ ┃ ┃ ┃ ┃ ┗ 📜utils_shap.cpython-313.pyc
+ ┃ ┃ ┃ ┣ 📜background.npy
  ┃ ┃ ┃ ┣ 📜build_background.py
  ┃ ┃ ┃ ┣ 📜build_xai_dataset.py
  ┃ ┃ ┃ ┣ 📜check_features.py
@@ -79,7 +86,14 @@
  ┃ ┃ ┃ ┣ 📜templates.py
  ┃ ┃ ┃ ┣ 📜test_single_explanation.py
  ┃ ┃ ┃ ┣ 📜utils_shap.py
+ ┃ ┃ ┃ ┣ 📜xai_explainer_dataset.csv
  ┃ ┃ ┃ ┗ 📜__init__.py
+ ┃ ┃ ┣ 📂__pycache__
+ ┃ ┃ ┃ ┗ 📜inference.cpython-313.pyc
+ ┃ ┃ ┣ 📜AE.py
+ ┃ ┃ ┣ 📜feature_minimax.json
+ ┃ ┃ ┣ 📜feature_minmax.json
+ ┃ ┃ ┣ 📜ids_pipeline.py
  ┃ ┃ ┣ 📜inference.py
  ┃ ┃ ┣ 📜pipeline.txt
  ┃ ┃ ┗ 📜prediction.py
@@ -114,7 +128,9 @@
  ┃ ┗ 📜main.py
  ┣ 📂Documents
  ┃ ┣ 📂features
- ┃ ┃ ┗ 📜feature1.txt
+ ┃ ┃ ┣ 📜CGAN features.txt
+ ┃ ┃ ┣ 📜feature1.txt
+ ┃ ┃ ┗ 📜frontend_features.txt
  ┃ ┣ 📂papers
  ┃ ┃ ┣ 📜paper1 summary.txt
  ┃ ┃ ┣ 📜paper1.pdf

@@ -41,6 +41,8 @@ class IdsProvider with ChangeNotifier {
   int _attackCount = 0;
   int _zeroDayCount = 0;
   Timer? _packetTimer;
+  Set<int> _processedPacketIds =
+      {}; // ADDED: Track processed IDs to prevent duplicates
 
   bool get isRunning => _isRunning;
   List<Packet> get packets => _packets;
@@ -49,9 +51,11 @@ class IdsProvider with ChangeNotifier {
   int get attackCount => _attackCount;
   int get zeroDayCount => _zeroDayCount;
 
-  static const String BASE_URL = "http://127.0.0.1:5000";
+  static const String BASE_URL = "http://127.0.0.1:5001";
 
   Future<void> startPipeline() async {
+    if (_isRunning) return; // ADDED: Prevent multiple starts
+
     _isRunning = true;
     notifyListeners();
 
@@ -62,9 +66,10 @@ class IdsProvider with ChangeNotifier {
       );
 
       if (response.statusCode == 200) {
-        // Start listening for packets - FIXED METHOD NAME
+        print("[FLUTTER] Pipeline started successfully");
         _startRealPacketStream();
       } else {
+        print("[FLUTTER] Failed to start pipeline: ${response.statusCode}");
         _isRunning = false;
         notifyListeners();
       }
@@ -76,26 +81,33 @@ class IdsProvider with ChangeNotifier {
   }
 
   Future<void> stopPipeline() async {
+    if (!_isRunning) return; // ADDED: Prevent multiple stops
+
     _isRunning = false;
-    _packetTimer?.cancel(); // Stop the timer
+    _packetTimer?.cancel();
+    _packetTimer = null;
     notifyListeners();
 
     try {
-      await http.post(
+      final response = await http.post(
         Uri.parse('$BASE_URL/api/pipeline/stop'),
         headers: {'X-API-Key': 'MySuperSecretKey12345!'},
       );
+
+      if (response.statusCode == 200) {
+        print("[FLUTTER] Pipeline stopped successfully");
+      }
     } catch (e) {
       print('Error stopping pipeline: $e');
     }
   }
 
-  // FIXED: This is the correct method name now
   void _startRealPacketStream() {
-    // Cancel any existing timer
     _packetTimer?.cancel();
 
-    // Start polling for packets every 2 seconds
+    // ADDED: Also fetch stats immediately when starting
+    _fetchStatsFromBackend();
+
     _packetTimer = Timer.periodic(Duration(seconds: 2), (timer) async {
       if (!_isRunning) {
         timer.cancel();
@@ -103,33 +115,77 @@ class IdsProvider with ChangeNotifier {
       }
 
       try {
-        final response = await http.get(
-          Uri.parse('$BASE_URL/api/packets/recent?limit=5'),
-          headers: {'X-API-Key': 'MySuperSecretKey12345!'},
-        );
-
-        if (response.statusCode == 200) {
-          final data = jsonDecode(response.body);
-          final List packets = data['packets'];
-
-          for (var packetData in packets) {
-            _addPacketFromApi(packetData);
-          }
-        }
+        // Fetch both packets and stats in parallel
+        await Future.wait([
+          _fetchRecentPackets(),
+          _fetchStatsFromBackend(),
+        ]);
       } catch (e) {
-        print('Error fetching packets: $e');
+        print('Error in packet stream: $e');
       }
     });
   }
 
+  // ADDED: Separate method for fetching packets
+  Future<void> _fetchRecentPackets() async {
+    try {
+      final response = await http.get(
+        Uri.parse('$BASE_URL/api/packets/recent?limit=10'), // Increased limit
+        headers: {'X-API-Key': 'MySuperSecretKey12345!'},
+      );
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        final List packets = data['packets'];
+
+        for (var packetData in packets) {
+          _addPacketFromApi(packetData);
+        }
+      }
+    } catch (e) {
+      print('Error fetching packets: $e');
+    }
+  }
+
+  // ADDED: Separate method for fetching stats from backend
+  Future<void> _fetchStatsFromBackend() async {
+    try {
+      final response = await http.get(
+        Uri.parse('$BASE_URL/api/stats'),
+        headers: {'X-API-Key': 'MySuperSecretKey12345!'},
+      );
+
+      if (response.statusCode == 200) {
+        final statsData = jsonDecode(response.body);
+        _updateStatsFromBackend(statsData);
+      }
+    } catch (e) {
+      print('Error fetching stats: $e');
+    }
+  }
+
+  // ADDED: Update stats from backend to stay in sync
+  void _updateStatsFromBackend(Map<String, dynamic> statsData) {
+    // Only update if backend has more recent data
+    if (statsData['total_packets'] > _totalPackets) {
+      _totalPackets = statsData['total_packets'] ?? _totalPackets;
+      _normalCount = statsData['normal_count'] ?? _normalCount;
+      _attackCount = statsData['attack_count'] ?? _attackCount;
+      _zeroDayCount = statsData['zero_day_count'] ?? _zeroDayCount;
+      notifyListeners();
+    }
+  }
+
   void _addPacketFromApi(Map<String, dynamic> data) {
-    // Check if we already have this packet to avoid duplicates
-    if (_packets.any((packet) => packet.id == data['id'])) {
+    final int packetId = data['id'];
+
+    // IMPROVED: Use Set for faster duplicate checking
+    if (_processedPacketIds.contains(packetId)) {
       return;
     }
 
     final packet = Packet(
-      id: data['id'],
+      id: packetId,
       summary: data['summary'],
       srcIp: data['src_ip'],
       dstIp: data['dst_ip'],
@@ -143,7 +199,11 @@ class IdsProvider with ChangeNotifier {
       explanation: data['explanation'],
     );
 
-    _packets.insert(0, packet); // Add to beginning for latest first
+    _packets.insert(0, packet);
+    _processedPacketIds.add(packetId); // Track this ID
+
+    // Note: We're letting backend stats be the source of truth
+    // but we'll still update locally for immediate UI feedback
     _totalPackets++;
 
     if (packet.status == 'normal') {
@@ -152,6 +212,14 @@ class IdsProvider with ChangeNotifier {
       _attackCount++;
     } else if (packet.status == 'zero_day') {
       _zeroDayCount++;
+    }
+
+    // ADDED: Limit packets list to prevent memory issues
+    if (_packets.length > 200) {
+      _packets = _packets.sublist(0, 100);
+      // Also clean up processed IDs to prevent memory leaks
+      final recentIds = _packets.map((p) => p.id).toSet();
+      _processedPacketIds = _processedPacketIds.intersection(recentIds);
     }
 
     notifyListeners();
@@ -181,17 +249,36 @@ class IdsProvider with ChangeNotifier {
     _packets.insert(0, packet);
     _totalPackets++;
     _zeroDayCount++;
+    _processedPacketIds.add(packet.id);
     notifyListeners();
   }
 
   // Clear all packets
   void clearPackets() {
     _packets.clear();
+    _processedPacketIds.clear();
     _totalPackets = 0;
     _normalCount = 0;
     _attackCount = 0;
     _zeroDayCount = 0;
     notifyListeners();
+  }
+
+  // ADDED: Get pipeline status from backend
+  Future<Map<String, dynamic>?> getPipelineStatus() async {
+    try {
+      final response = await http.get(
+        Uri.parse('$BASE_URL/api/pipeline/status'),
+        headers: {'X-API-Key': 'MySuperSecretKey12345!'},
+      );
+
+      if (response.statusCode == 200) {
+        return jsonDecode(response.body);
+      }
+    } catch (e) {
+      print('Error fetching pipeline status: $e');
+    }
+    return null;
   }
 
   @override

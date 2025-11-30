@@ -18,7 +18,7 @@ class DashboardScreen extends StatelessWidget {
           // Control Panel
           _buildControlPanel(context),
 
-          // Statistics
+          // Statistics with ZERO-DAY COUNTER
           _buildStatsGrid(context),
 
           // Packet List
@@ -87,6 +87,7 @@ class DashboardScreen extends StatelessWidget {
     );
   }
 
+  // UPDATED: Added Zero-Day Counter
   Widget _buildStatsGrid(BuildContext context) {
     final provider = Provider.of<IdsProvider>(context);
 
@@ -118,6 +119,16 @@ class DashboardScreen extends StatelessWidget {
               value: provider.attackCount.toString(),
               color: Colors.red,
               icon: Icons.warning,
+            ),
+          ),
+          SizedBox(width: 8),
+          // ZERO-DAY COUNTER ADDED
+          Expanded(
+            child: StatsCard(
+              title: 'ZERO-DAY',
+              value: provider.zeroDayCount.toString(),
+              color: Colors.orange,
+              icon: Icons.new_releases,
             ),
           ),
         ],

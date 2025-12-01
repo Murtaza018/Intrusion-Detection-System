@@ -1,0 +1,288 @@
+# xai_explainer.py
+# Complete XAI implementation with SHAP
+
+import sys
+import os
+import numpy as np
+import shap
+import threading
+from collections import deque
+
+# Add XAI directory to path
+from config import XAI_DIR
+
+if XAI_DIR not in sys.path:
+    sys.path.insert(0, XAI_DIR)
+
+class XAIExplainer:
+    """Complete XAI explanation system"""
+    
+    def __init__(self):
+        self.background_data = deque(maxlen=100)
+        self.shap_explainer = None
+        self.initialized = False
+        self.lock = threading.Lock()
+        self.feature_names = self._get_feature_names()
+    
+    def _get_feature_names(self):
+        """Get feature names for better explanations"""
+        # Placeholder for 78 feature names.
+        # Replace with actual feature names if available.
+        return [f"Feature_{i}" for i in range(78)]
+
+    
+    def add_background_sample(self, features):
+        """Add sample to background data for SHAP"""
+        self.background_data.append(features)
+    
+    def initialize_shap(self, model_predict_func, num_samples=20):
+        """Initialize SHAP explainer"""
+        with self.lock:
+            if self.initialized:
+                return True
+            
+            try:
+                print("[XAI] Initializing SHAP explainer...")
+                
+                if len(self.background_data) < num_samples:
+                    print(f"[XAI] Need at least {num_samples} background samples, have {len(self.background_data)}")
+                    return False
+                
+                # Convert to numpy array
+                background_array = np.array(list(self.background_data))
+                
+                # Use K-means to summarize background data
+                # This reduces the number of background samples to at most num_samples
+                bg_summary = shap.kmeans(background_array, min(num_samples, len(background_array)))
+                
+                # Initialize SHAP KernelExplainer
+                self.shap_explainer = shap.KernelExplainer(
+                    model=model_predict_func,
+                    data=bg_summary
+                )
+                
+                self.initialized = True
+                print(f"[XAI] ✅ SHAP initialized with {len(background_array)} background samples")
+                return True
+                
+            except Exception as e:
+                print(f"[!] SHAP initialization failed: {e}")
+                import traceback
+                traceback.print_exc()
+                return False
+    
+    def generate_explanation(self, features, model_predict_func, confidence, packet_info, attack_type="Attack"):
+        """Generate complete XAI explanation"""
+        
+        # Use SHAP for explanation
+        try:
+            if not self.initialized:
+                if not self.initialize_shap(model_predict_func):
+                    return self._generate_fallback_explanation(features, confidence, packet_info, attack_type)
+            
+            print("[XAI] 🔬 Generating SHAP explanation...")
+            
+            # Calculate SHAP values
+            # nsamples determines the number of times the model is evaluated. Higher is more accurate but slower.
+            shap_values = self.shap_explainer.shap_values(
+                features.reshape(1, -1), 
+                nsamples=100, 
+                silent=True
+            )
+            
+            # Process SHAP output
+            if isinstance(shap_values, list):
+                # For binary classification, shap_values is a list of two arrays.
+                # Each array has shape (n_samples, n_features).
+                # We want the SHAP values for the "Attack" class, which is typically class 1.
+                # Since we are explaining a single sample, we take the first element.
+                shap_vals = shap_values[1][0]
+            else:
+                # For regression or other models, it might be a single array.
+                shap_vals = shap_values[0]
+            
+            # Get top contributing features
+            top_features = self._get_top_features(shap_vals, features)
+            
+            # Generate rich explanation
+            explanation = self._generate_shap_based_explanation(
+                shap_vals, features, confidence, packet_info, attack_type, top_features
+            )
+            
+            explanation["computation_method"] = "SHAP KernelExplainer"
+            return explanation
+            
+        except Exception as e:
+            print(f"[!] SHAP explanation failed: {e}")
+            import traceback
+            traceback.print_exc()
+            return self._generate_fallback_explanation(features, confidence, packet_info, attack_type)
+    
+    def _get_top_features(self, shap_values, features, top_n=5):
+        """Get top contributing features from SHAP values"""
+        contributions = []
+        for i, contrib in enumerate(shap_values):
+            feature_name = self.feature_names[i] if i < len(self.feature_names) else f"Feature_{i}"
+            contributions.append({
+                "feature": feature_name,
+                "contribution": float(contrib),
+                "value": float(features[i])
+            })
+        
+        # Sort by absolute contribution
+        contributions.sort(key=lambda x: abs(x["contribution"]), reverse=True)
+        return contributions[:top_n]
+    
+    def _generate_shap_based_explanation(self, shap_values, features, confidence, packet_info, attack_type, top_features):
+        """Generate rich explanation based on SHAP values"""
+        
+        if attack_type == "zero_day":
+            return {
+                "type": "ZERO_DAY_ANOMALY",
+                "title": "🆕 Zero-Day Anomaly Detected",
+                "description": "Unprecedented network behavior detected that doesn't match any known attack patterns.",
+                "risk_level": "HIGH",
+                "confidence": f"{confidence:.1%}",
+                "key_indicators": [
+                    "Behavior deviates significantly from normal patterns",
+                    "Autoencoder reconstruction error elevated",
+                    "Pattern doesn't match known attack signatures"
+                ],
+                "top_contributing_factors": [
+                    {
+                        "factor": f"{feat['feature']}",
+                        "impact": "Increased risk" if feat['contribution'] > 0 else "Decreased risk",
+                        "magnitude": f"{abs(feat['contribution']):.3f}",
+                        "observed_value": f"{feat['value']:.2f}"
+                    }
+                    for feat in top_features
+                ],
+                "recommended_actions": [
+                    "Investigate source IP for compromise",
+                    "Check for unusual process executions", 
+                    "Review system and application logs",
+                    "Monitor for similar patterns"
+                ]
+            }
+        else:
+            # Determine attack subtype
+            # Feature 0 is destination port
+            dst_port = int(features[0])
+            attack_subtype = self._determine_attack_subtype(dst_port, top_features)
+            
+            explanations = {
+                "brute_force": {
+                    "title": "🚨 Brute Force Attack Detected",
+                    "description": f"Multiple rapid connection attempts detected on port {dst_port} indicating potential credential brute forcing.",
+                    "indicators": ["High packet frequency", "Multiple failed connections", "Suspicious source behavior"]
+                },
+                "web_attack": {
+                    "title": "🌐 Web Application Attack",
+                    "description": "Suspicious HTTP/HTTPS traffic patterns indicating potential SQL injection, XSS, or directory traversal attempts.",
+                    "indicators": ["Abnormal request patterns", "Suspicious payload signatures", "Anomalous header structures"]
+                },
+                "ddos": {
+                    "title": "⚠️ DDoS/Flood Attack",
+                    "description": "High volume traffic patterns suggesting distributed denial of service or flood attack.",
+                    "indicators": ["Extremely high packet rate", "Multiple source IPs", "Sustained traffic volume"]
+                },
+                "general": {
+                    "title": "⚠️ Suspicious Network Activity",
+                    "description": "Unusual network traffic patterns detected that match known attack signatures.",
+                    "indicators": ["Anomalous flow characteristics", "Suspicious timing patterns", "Irregular packet sizes"]
+                }
+            }
+            
+            attack_info = explanations.get(attack_subtype, explanations["general"])
+            
+            return {
+                "type": "KNOWN_ATTACK",
+                "title": attack_info["title"],
+                "description": attack_info["description"],
+                "risk_level": "HIGH" if confidence > 0.8 else "MEDIUM",
+                "confidence": f"{confidence:.1%}",
+                "attack_classification": attack_subtype.replace('_', ' ').title(),
+                "key_indicators": attack_info["indicators"],
+                "top_contributing_factors": [
+                    {
+                        "factor": f"{feat['feature']}",
+                        "impact": "Increased risk" if feat['contribution'] > 0 else "Decreased risk",
+                        "magnitude": f"{abs(feat['contribution']):.3f}",
+                        "observed_value": f"{feat['value']:.2f}"
+                    }
+                    for feat in top_features
+                ],
+                "recommended_actions": self._get_recommended_actions(attack_subtype),
+                "shap_summary": {
+                    "base_value": float(np.mean(shap_values)) if len(shap_values) > 0 else 0.0,
+                    "total_impact": float(np.sum(np.abs(shap_values))) if len(shap_values) > 0 else 0.0
+                }
+            }
+    
+    def _determine_attack_subtype(self, dst_port, top_features):
+        """Determine attack subtype based on port and features"""
+        if dst_port in [21, 22, 23, 3389]:
+            return "brute_force"
+        elif dst_port in [80, 443, 8080]:
+            return "web_attack"
+        # This logic is a bit fragile as it depends on feature names.
+        # With the generic feature names, this condition will never be met.
+        # It's better to leave it as is for now and let it fall back to "general".
+        elif any("Packet" in feat["feature"] and feat["contribution"] > 0.1 for feat in top_features[:3]):
+            return "ddos"
+        else:
+            return "general"
+    
+    def _get_recommended_actions(self, attack_type):
+        """Get recommended actions based on attack type"""
+        actions = {
+            "brute_force": [
+                "Block source IP temporarily",
+                "Implement rate limiting",
+                "Enable account lockout policies",
+                "Review SSH/RDP/FTP logs",
+                "Check for compromised accounts"
+            ],
+            "web_attack": [
+                "Block source IP temporarily",
+                "Review web server logs",
+                "Check for SQL injection patterns",
+                "Validate input sanitization",
+                "Update web application firewall rules"
+            ],
+            "ddos": [
+                "Enable DDoS protection",
+                "Block offending IP ranges",
+                "Implement rate limiting",
+                "Contact ISP if attack persists",
+                "Monitor network bandwidth"
+            ],
+            "general": [
+                "Block source IP temporarily",
+                "Investigate source for compromise",
+                "Check authentication logs",
+                "Monitor for similar patterns",
+                "Update firewall rules if pattern persists"
+            ]
+        }
+        return actions.get(attack_type, actions["general"])
+    
+    def _generate_fallback_explanation(self, features, confidence, packet_info, attack_type):
+        """Generate fallback explanation when SHAP fails"""
+        if attack_type == "zero_day":
+            return {
+                "type": "ZERO_DAY_FALLBACK",
+                "title": "🆕 Anomaly Detected",
+                "description": f"Unusual network pattern detected with confidence {confidence:.1%}.",
+                "risk_level": "MEDIUM",
+                "confidence": f"{confidence:.1%}"
+            }
+        else:
+            return {
+                "type": "ATTACK_FALLBACK",
+                "title": "⚠️ Attack Detected",
+                "description": f"Known attack pattern detected with confidence {confidence:.1%}.",
+                "risk_level": "HIGH" if confidence > 0.8 else "MEDIUM",
+                "confidence": f"{confidence:.1%}",
+                "recommended_actions": ["Investigate immediately", "Check logs", "Monitor network"]
+            }

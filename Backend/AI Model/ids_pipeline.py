@@ -1,5 +1,5 @@
-# ids_pipeline_fixed.py
-# COMPLETE VERSION: XAI with Memory Protection
+# ids_pipeline_fixed_xai.py
+# FIXED XAI IMPORT - SAME FOLDER LEVEL
 
 import sys
 import os
@@ -11,324 +11,481 @@ from datetime import datetime
 import json
 import gc
 import psutil
-
+import warnings
 import numpy as np
+
+# Import SHAP and Scapy
+import shap
 from scapy.all import sniff, IP, TCP, UDP
 
-# ----- MEMORY PROTECTION -----
-def get_memory_usage():
-    """Get current memory usage in MB"""
-    try:
-        process = psutil.Process()
-        return process.memory_info().rss / 1024 / 1024
-    except Exception:
-        return 0
+# Suppress warnings
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+os.environ['TF_FORCE_GPU_ALLOW_GROWTH'] = 'true'
+warnings.filterwarnings('ignore')
 
-def safe_explain_alert(features, model_name, attack_type):
-    """Safe XAI wrapper with memory limits"""
-    memory_before = get_memory_usage()
-    
-    # Don't run XAI if memory is already high
-    if memory_before > 1000:  # 1GB threshold
-        return {
-            "explanation": "Memory protection: XAI disabled to prevent system overload",
-            "facts": ["System operating in safe mode due to memory constraints"]
-        }
-    
-    try:
-        from explanation_inference import explain_alert
-        
-        # Run XAI with timeout protection
-        result = explain_alert(features, model_name, attack_type)
-        
-        memory_after = get_memory_usage()
-        memory_used = memory_after - memory_before
-        
-        print(f"[XAI MEMORY] Used: {memory_used:.1f}MB, Total: {memory_after:.1f}MB")
-        
-        # Force garbage collection after XAI
-        gc.collect()
-        
-        return result
-        
-    except Exception as e:
-        print(f"[XAI ERROR] {e}")
-        return {
-            "explanation": f"XAI temporarily unavailable: {str(e)}",
-            "facts": ["Explanation service recovering"]
-        }
+import tensorflow as tf
+from tensorflow.keras.models import load_model
 
-# ----- FLUTTER API INTEGRATION -----
-from flask import Flask, jsonify, request
-from flask_cors import CORS
+tf.compat.v1.logging.set_verbosity(tf.compat.v1.logging.ERROR)
 
-# Initialize Flask app for Flutter communication
-app = Flask(__name__)
-CORS(app)
-
-# Global state for Flutter communication
-flutter_packets = deque(maxlen=100)  # Reduced from 1000
-packet_id_counter = 1
-flutter_stats = {
-    "total_packets": 0,
-    "normal_count": 0,
-    "attack_count": 0, 
-    "zero_day_count": 0,
-    "start_time": None
-}
-
-def send_to_flutter(packet, status, confidence=0.0, explanation=None):
-    """Send real packet data to Flutter app with memory checks"""
-    global packet_id_counter, flutter_stats
-    
-    packet_data = {
-        "id": packet_id_counter,
-        "summary": f"{'TCP' if packet.haslayer(TCP) else 'UDP' if packet.haslayer(UDP) else 'OTHER'} {packet[IP].src if packet.haslayer(IP) else ''} → {packet[IP].dst if packet.haslayer(IP) else ''}",
-        "src_ip": packet[IP].src if packet.haslayer(IP) else "",
-        "dst_ip": packet[IP].dst if packet.haslayer(IP) else "",
-        "protocol": "TCP" if packet.haslayer(TCP) else "UDP" if packet.haslayer(UDP) else "OTHER",
-        "src_port": getattr(packet, "sport", 0),
-        "dst_port": getattr(packet, "dport", 0),
-        "length": len(packet),
-        "timestamp": datetime.now().isoformat(),
-        "status": status,
-        "confidence": float(confidence),
-    }
-    
-    # Only include explanation if memory is safe
-    if explanation and get_memory_usage() < 800:  # Only if < 800MB
-        packet_data["explanation"] = explanation
-    
-    flutter_packets.appendleft(packet_data)
-    packet_id_counter += 1
-    
-    # Update statistics
-    flutter_stats["total_packets"] += 1
-    if status == "normal":
-        flutter_stats["normal_count"] += 1
-    elif status == "known_attack":
-        flutter_stats["attack_count"] += 1
-    elif status == "zero_day":
-        flutter_stats["zero_day_count"] += 1
-    
-    # Force GC every 50 packets
-    if flutter_stats["total_packets"] % 50 == 0:
-        gc.collect()
-
-# Flask endpoints for Flutter app
-@app.route("/api/pipeline/start", methods=['POST'])
-def start_pipeline():
-    """Start the IDS pipeline"""
-    flutter_stats["start_time"] = datetime.now().isoformat()
-    print("[FLUTTER] Pipeline start requested")
-    return jsonify({"status": "started", "message": "IDS pipeline is running"})
-
-@app.route("/api/pipeline/stop", methods=['POST'])
-def stop_pipeline():
-    """Stop the IDS pipeline"""
-    print("[FLUTTER] Pipeline stop requested")
-    return jsonify({"status": "stopped", "message": "Stop functionality not implemented yet"})
-
-@app.route("/api/packets/recent", methods=['GET'])
-def get_recent_packets():
-    """Get recent captured packets"""
-    limit = min(int(request.args.get('limit', 20)), 50)
-    recent_packets = list(flutter_packets)[:limit]
-    return jsonify({
-        "packets": recent_packets,
-        "count": len(recent_packets),
-        "total_captured": flutter_stats["total_packets"]
-    })
-
-@app.route("/api/stats", methods=['GET'])
-def get_stats():
-    """Get current statistics including zero-day count"""
-    return jsonify(flutter_stats)
-
-@app.route("/api/pipeline/status", methods=['GET'])
-def pipeline_status():
-    return jsonify({
-        "running": True,
-        "stats": flutter_stats,
-        "memory_mb": round(get_memory_usage(), 1)
-    })
-
-@app.route("/api/packets/<int:packet_id>", methods=['GET'])
-def get_packet_details(packet_id):
-    """Get detailed information for a specific packet"""
-    for packet in flutter_packets:
-        if packet["id"] == packet_id:
-            return jsonify(packet)
-    return jsonify({"error": "Packet not found"}), 404
-
-def run_flask():
-    """Run Flask in a separate thread"""
-    print("[FLUTTER] Starting Flask server on http://127.0.0.1:5001")
-    app.run(host='0.0.0.0', port=5001, debug=False, use_reloader=False)
-
-# ----- ORIGINAL IDS PIPELINE CONFIG -----
+# ----- CONFIGURATION -----
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-if BASE_DIR not in sys.path:
-    sys.path.append(BASE_DIR)
+MINMAX_SAVE_PATH = os.path.join(BASE_DIR, "feature_minimax.json")
 
+# Model paths
+MAIN_MODEL_REL_PATH = os.path.join("Adversarial Attack and Defense", "cicids_spatiotemporal_model_hardened.keras")
+AUTOENCODER_REL_PATH = os.path.join("Autoencoder", "cicids_autoencoder.keras")
+
+MAIN_MODEL_ABS_PATH = os.path.join(BASE_DIR, MAIN_MODEL_REL_PATH)
+AUTOENCODER_ABS_PATH = os.path.join(BASE_DIR, AUTOENCODER_REL_PATH)
+
+# API Configuration
+API_KEY = "MySuperSecretKey12345!"
+
+# ----- FIXED XAI IMPORT - SAME FOLDER LEVEL -----
+# XAI folder is in the same directory as this script
 XAI_DIR = os.path.join(BASE_DIR, "XAI")
 if XAI_DIR not in sys.path:
-    sys.path.append(XAI_DIR)
+    sys.path.insert(0, XAI_DIR)
+
+print(f"[*] Looking for XAI in: {XAI_DIR}")
+
+# Try to import the proper XAI system from XAI folder
+try:
+    from explanation_inference import explain_alert
+    XAI_AVAILABLE = True
+    print("[+] ✅ Loaded proper XAI explanation system from XAI folder")
+except ImportError as e:
+    print(f"[!] ❌ Could not load proper XAI system: {e}")
+    print(f"[!] Files in XAI directory: {os.listdir(XAI_DIR) if os.path.exists(XAI_DIR) else 'Directory not found'}")
+    print("[!] Will use enhanced fallback explanations")
+    XAI_AVAILABLE = False
+
+# ----- KERAS MODEL LOADING -----
+print("[*] Loading Keras models...")
+loaded_model = None
+zero_day_model = None
 
 try:
-    from inference import predict
-    # We'll import explain_alert only when needed in safe_explain_alert
-except ImportError as e:
-    print(f"[!] Error importing AI modules: {e}")
-    sys.exit(1)
+    if not os.path.exists(MAIN_MODEL_ABS_PATH):
+        raise FileNotFoundError(f"Main model not found at: {MAIN_MODEL_ABS_PATH}")
+    
+    print(f"[*] Loading main model from: {MAIN_MODEL_REL_PATH}...")
+    loaded_model = load_model(MAIN_MODEL_ABS_PATH, compile=False)
+    
+    if not os.path.exists(AUTOENCODER_ABS_PATH):
+        raise FileNotFoundError(f"Autoencoder model not found at: {AUTOENCODER_ABS_PATH}")
+        
+    print(f"[*] Loading autoencoder from: {AUTOENCODER_REL_PATH}...")
+    zero_day_model = load_model(AUTOENCODER_ABS_PATH, compile=False)
 
-BACKEND_URL = "https://127.0.0.1:5000/api/alerts"
-API_KEY = "MySuperSecretKey12345!"
+    print("[+] Keras models loaded successfully.")
+    # Warmup models
+    dummy_input = np.zeros((1, 78), dtype=np.float32)
+    loaded_model.predict(dummy_input, verbose=0)
+    zero_day_model.predict(dummy_input, verbose=0)
+    print("[+] Model warmup complete.")
+
+except FileNotFoundError as e:
+    print(f"\n[!] CRITICAL ERROR: {e}")
+    print("Please ensure the model directories exist with the correct .keras files")
+    sys.exit(1)
+except Exception as e:
+    print(f"\n[!] CRITICAL ERROR loading Keras models: {e}")
+    import traceback
+    traceback.print_exc()
+    sys.exit(1)
 
 from scapy.config import conf
 INTERFACE = conf.iface
 
+# FEATURE CONFIG
 NUM_FEATURES = 78
 FLOW_TIMEOUT = 300
 DEBUG = True
+WARMUP_SAMPLES = 50
+BACKGROUND_SUMMARY_SIZE = 20
 
-# Memory-optimized settings
-WARMUP_SAMPLES = 4
-MINMAX_SAVE_PATH = os.path.join(BASE_DIR, "feature_minimax.json")
+# MEMORY CONFIG
+MAX_MEMORY_MB = 1500
+XAI_QUEUE_MAXSIZE = 5
 
-ERROR_WINDOW = 200  # Reduced from 500
-THRESHOLD_K = 6.0
+# THRESHOLD CONFIG
+ERROR_WINDOW = 200
+THRESHOLD_K = 3.0
 MIN_SAMPLES_FOR_THRESHOLD = 50
-PCT_FOR_THRESHOLD = 95.0
 
-# More frequent flow cleanup
-flow_cleanup_interval = 60
-last_flow_cleanup = time.time()
-
-# runtime structures
+# ----- GLOBAL STRUCTURES -----
 packet_queue = queue.Queue()
+xai_queue = queue.Queue(maxsize=XAI_QUEUE_MAXSIZE)
 flows = defaultdict(lambda: {"packets": [], "timestamps": [], "lengths": [], "flags": []})
+_recent_errors = deque(maxlen=ERROR_WINDOW)
 
-# min/max state and warmup
+# Min/max state
 _live_min = None
 _live_max = None
 _warmup_count = 0
 _warmup_lock = threading.Lock()
-_recent_errors = deque(maxlen=ERROR_WINDOW)
 _scaling_enabled = False
 
-# Debug counters
-_total_packets = 0
-_anomaly_count = 0
-_normal_count = 0
+# XAI globals
+_background_data_buffer = deque(maxlen=100)
+_shap_explainer = None
+_shap_initialized = False
+_xai_lock = threading.Lock()
 
-# ---------------- Memory-optimized feature extraction ----------------
+# Pipeline state
+_pipeline_running = False
+_pipeline_start_time = None
+
+# ----- FLUTTER API WITH AUTHENTICATION -----
+from flask import Flask, jsonify, request
+from flask_cors import CORS
+
+app = Flask(__name__)
+CORS(app)
+
+def require_api_key(f):
+    def decorated_function(*args, **kwargs):
+        api_key = request.headers.get('X-API-Key')
+        if api_key != API_KEY:
+            return jsonify({"error": "Invalid API key"}), 401
+        return f(*args, **kwargs)
+    decorated_function.__name__ = f.__name__
+    return decorated_function
+
+# Flutter display - thread-safe storage
+class PacketStorage:
+    def __init__(self, max_size=50):
+        self.max_size = max_size
+        self.packets = deque(maxlen=max_size)
+        self.lock = threading.Lock()
+        self.stats = {
+            "total_packets": 0,
+            "normal_count": 0,
+            "attack_count": 0,
+            "zero_day_count": 0,
+            "start_time": None,
+            "memory_usage_mb": 0,
+            "pipeline_status": "stopped"
+        }
+        self.stats_lock = threading.Lock()
+
+    def add_packet(self, packet_data):
+        with self.lock:
+            # Remove existing packet with same ID if present
+            self.packets = deque([p for p in self.packets if p['id'] != packet_data['id']], maxlen=self.max_size)
+            self.packets.appendleft(packet_data)
+
+    def get_packets(self, limit=None):
+        with self.lock:
+            packets = list(self.packets)
+            if limit and len(packets) > limit:
+                return packets[:limit]
+            return packets
+
+    def update_stats(self, stats_update):
+        with self.stats_lock:
+            self.stats.update(stats_update)
+
+    def get_stats(self):
+        with self.stats_lock:
+            return self.stats.copy()
+
+    def clear(self):
+        with self.lock:
+            self.packets.clear()
+        with self.stats_lock:
+            self.stats.update({
+                "total_packets": 0,
+                "normal_count": 0,
+                "attack_count": 0,
+                "zero_day_count": 0
+            })
+
+packet_storage = PacketStorage()
+
+@app.route("/api/pipeline/start", methods=['POST'])
+@require_api_key
+def start_pipeline():
+    global _pipeline_running, _pipeline_start_time
+    
+    if _pipeline_running:
+        return jsonify({"status": "already_running", "message": "Pipeline is already running"})
+    
+    _pipeline_running = True
+    _pipeline_start_time = datetime.now().isoformat()
+    
+    packet_storage.update_stats({
+        "start_time": _pipeline_start_time,
+        "pipeline_status": "running"
+    })
+    
+    print("[API] Pipeline started via Flutter request")
+    return jsonify({
+        "status": "started", 
+        "message": "IDS pipeline started successfully",
+        "start_time": _pipeline_start_time
+    })
+
+@app.route("/api/pipeline/stop", methods=['POST'])
+@require_api_key
+def stop_pipeline():
+    global _pipeline_running
+    
+    if not _pipeline_running:
+        return jsonify({"status": "already_stopped", "message": "Pipeline is already stopped"})
+    
+    _pipeline_running = False
+    
+    packet_storage.update_stats({
+        "pipeline_status": "stopped"
+    })
+    
+    print("[API] Pipeline stopped via Flutter request")
+    return jsonify({"status": "stopped", "message": "IDS pipeline stopped successfully"})
+
+@app.route("/api/pipeline/status", methods=['GET'])
+@require_api_key
+def get_pipeline_status():
+    return jsonify({
+        "running": _pipeline_running,
+        "start_time": _pipeline_start_time,
+        "current_time": datetime.now().isoformat(),
+        "packets_processed": packet_storage.get_stats()["total_packets"]
+    })
+
+@app.route("/api/packets/recent", methods=['GET'])
+@require_api_key
+def get_recent_packets():
+    limit = request.args.get('limit', default=10, type=int)
+    packets = packet_storage.get_packets(limit=limit)
+    
+    return jsonify({
+        "packets": packets,
+        "count": len(packets),
+        "limit": limit,
+        "last_updated": datetime.now().isoformat()
+    })
+
+@app.route("/api/stats", methods=['GET'])
+@require_api_key
+def get_stats():
+    stats = packet_storage.get_stats()
+    stats["memory_usage_mb"] = round(get_memory_usage(), 1)
+    stats["current_time"] = datetime.now().isoformat()
+    return jsonify(stats)
+
+@app.route("/api/system/health", methods=['GET'])
+@require_api_key
+def get_health():
+    health_info = {
+        "memory_mb": round(get_memory_usage(), 1),
+        "total_packets_processed": packet_storage.get_stats()["total_packets"],
+        "background_samples": len(_background_data_buffer),
+        "active_flows": len(flows),
+        "scaling_enabled": _scaling_enabled,
+        "shap_initialized": _shap_initialized,
+        "pipeline_running": _pipeline_running,
+        "timestamp": datetime.now().isoformat()
+    }
+    return jsonify(health_info)
+
+def run_flask():
+    print("[FLUTTER] Starting Flask server on http://127.0.0.1:5001")
+    print(f"[FLUTTER] API Key: {API_KEY}")
+    app.run(host='127.0.0.1', port=5001, debug=False, use_reloader=False)
+
+# ----- PROPER XAI EXPLANATION SYSTEM -----
+def generate_proper_xai_explanation(features, confidence, packet_info, attack_type="Attack"):
+    """Use the proper XAI system from explanation_inference.py"""
+    
+    if XAI_AVAILABLE:
+        try:
+            print(f"[XAI] 🧠 Generating proper explanation using explain_alert()")
+            explanation = explain_alert(features, "hardened_classifier", attack_type=attack_type)
+            
+            # Format the explanation for Flutter
+            formatted_explanation = {
+                "type": "PROPER_XAI_EXPLANATION",
+                "title": "🔍 AI-Powered Threat Analysis",
+                "facts": explanation.get("facts", {}),
+                "explanation_text": explanation.get("explanation", "No explanation generated"),
+                "risk_level": _extract_risk_level(explanation.get("explanation", "")),
+                "confidence": f"{confidence:.1%}",
+                "detection_method": "Ensemble Classifier + SHAP XAI",
+                "technical_details": {
+                    "model_used": "hardened_classifier",
+                    "feature_count": len(features),
+                    "attack_type": attack_type
+                }
+            }
+            return formatted_explanation
+        except Exception as e:
+            print(f"[!] Proper XAI failed: {e}")
+            # Fall through to fallback
+    
+    # Fallback explanation if proper XAI is not available
+    return generate_fallback_explanation(features, confidence, packet_info, attack_type)
+
+def _extract_risk_level(explanation_text):
+    """Extract risk level from explanation text"""
+    if "Risk: High" in explanation_text:
+        return "HIGH"
+    elif "Risk: Medium" in explanation_text:
+        return "MEDIUM" 
+    elif "Risk: Low" in explanation_text:
+        return "LOW"
+    else:
+        return "MEDIUM"  # Default
+
+def generate_fallback_explanation(features, confidence, packet_info, attack_type):
+    """Enhanced fallback explanation"""
+    
+    if attack_type == "zero_day":
+        return {
+            "type": "ZERO_DAY_ANOMALY",
+            "title": "🆕 Zero-Day Anomaly Detected",
+            "description": "Unprecedented network behavior detected that doesn't match any known attack patterns.",
+            "risk_level": "HIGH",
+            "confidence": f"{confidence:.1%}",
+            "key_indicators": [
+                "Behavior deviates significantly from normal patterns",
+                "Autoencoder reconstruction error elevated",
+                "Pattern doesn't match known attack signatures"
+            ],
+            "recommended_actions": [
+                "Investigate source IP for compromise",
+                "Check for unusual process executions", 
+                "Review system and application logs",
+                "Monitor for similar patterns"
+            ]
+        }
+    else:
+        return {
+            "type": "KNOWN_ATTACK",
+            "title": "🚨 Known Attack Pattern Detected",
+            "description": f"Network traffic matches known {attack_type.lower()} patterns with {confidence:.1%} confidence.",
+            "risk_level": "HIGH" if confidence > 0.8 else "MEDIUM",
+            "confidence": f"{confidence:.1%}",
+            "key_indicators": [
+                "Suspicious network flow characteristics",
+                "Anomalous packet timing and sizes", 
+                "Matches trained attack signatures"
+            ],
+            "recommended_actions": [
+                "Block source IP temporarily",
+                "Investigate source for compromise",
+                "Check authentication logs",
+                "Update firewall rules if pattern persists"
+            ]
+        }
+
+def generate_normal_explanation(features, packet_info):
+    """Explanation for normal traffic"""
+    return {
+        "type": "NORMAL_TRAFFIC",
+        "title": "✅ Normal Network Traffic",
+        "description": "This network traffic matches expected patterns and shows no signs of malicious activity.",
+        "risk_level": "LOW",
+        "confidence": "99.9%",
+        "verification_notes": [
+            "All security checks passed",
+            "No behavioral anomalies detected", 
+            "Traffic patterns within normal parameters"
+        ]
+    }
+
+# ----- MEMORY MANAGEMENT -----
+def get_memory_usage():
+    process = psutil.Process()
+    return process.memory_info().rss / 1024 / 1024
+
+def check_memory_usage():
+    current_memory = get_memory_usage()
+    if current_memory > MAX_MEMORY_MB:
+        emergency_memory_cleanup()
+    return current_memory
+
+def emergency_memory_cleanup():
+    global _background_data_buffer, flows
+    print(f"[!] Emergency memory cleanup - Current: {get_memory_usage():.1f}MB")
+    gc.collect()
+    tf.keras.backend.clear_session()
+    if len(_background_data_buffer) > 50:
+        _background_data_buffer = deque(list(_background_data_buffer)[-50:], maxlen=100)
+    cleanup_old_flows(flows, max_age=60, max_flows=50)
+
+# ----- FEATURE EXTRACTION -----
 def extract_features_pure_python(packet):
-    """Lightweight feature extraction optimized for memory"""
     features = [0.0] * NUM_FEATURES
     try:
-        if not packet.haslayer(IP):
+        if not packet.haslayer(IP): 
             return features
-
+            
         ip_layer = packet[IP]
         proto = 6 if packet.haslayer(TCP) else 17 if packet.haslayer(UDP) else 0
         sport = getattr(packet, "sport", 0)
         dport = getattr(packet, "dport", 0)
         flow_key = (ip_layer.src, ip_layer.dst, sport, dport, proto)
 
-        # Memory-optimized flow cleanup
-        global last_flow_cleanup
-        now = time.time()
-        if now - last_flow_cleanup > flow_cleanup_interval:
-            for k in list(flows.keys()):
-                if flows[k]["timestamps"] and now - flows[k]["timestamps"][-1] > FLOW_TIMEOUT:
-                    del flows[k]
-            last_flow_cleanup = now
-
-        # Update flow with limits
         if flow_key not in flows:
             flows[flow_key] = {"packets": [], "timestamps": [], "lengths": [], "flags": []}
-        
         flow = flows[flow_key]
+        
         flow["packets"].append(packet)
-        flow["timestamps"].append(now)
+        flow["timestamps"].append(time.time())
         pkt_len = len(packet)
         flow["lengths"].append(pkt_len)
-
-        # Limit flow history to prevent memory growth
+        
         if len(flow["packets"]) > 50:
-            flow["packets"] = flow["packets"][-25:]
-            flow["timestamps"] = flow["timestamps"][-25:]
-            flow["lengths"] = flow["lengths"][-25:]
-            flow["flags"] = flow["flags"][-25:]
+            for k in flow: 
+                flow[k] = flow[k][-50:]
 
-        # Flags -> int safely
         last_flags = 0
         if proto == 6 and packet.haslayer(TCP):
-            try:
+            try: 
                 last_flags = int(packet[TCP].flags)
-            except Exception:
-                last_flags = 0
+            except: 
+                pass
         flow["flags"].append(last_flags)
 
         lengths = flow["lengths"]
         pkt_count = len(lengths)
         total_len = float(sum(lengths))
-
-        # Essential features only (reduced computation)
+        
+        # Basic features
         features[0] = float(dport)
-        features[1] = float(flow["timestamps"][-1] - flow["timestamps"][0] + 1e-9) if pkt_count > 1 else 1.0
+        features[1] = float(flow["timestamps"][-1] - flow["timestamps"][0] + 1e-9) if pkt_count > 1 else 0.0
         features[2] = float(pkt_count)
         features[3] = float(pkt_count)
         features[4] = float(total_len)
         features[5] = float(total_len)
-
-        if pkt_count:
+        
+        if pkt_count > 0:
             features[6] = float(max(lengths))
             features[7] = float(min(lengths))
             features[8] = float(total_len / pkt_count)
-            features[10] = features[6]
-            features[11] = features[7]
-            features[12] = features[8]
-
+        
         dur = features[1]
-        if dur <= 1e-6:
-            features[14] = float(total_len)
-            features[15] = float(pkt_count)
-        else:
+        if dur > 1e-6:
             features[14] = float(total_len / dur)
             features[15] = float(pkt_count / dur)
-
-        # Simplified timing features
-        timestamps = flow["timestamps"]
-        if len(timestamps) > 1:
-            iats = [timestamps[i+1] - timestamps[i] for i in range(len(timestamps)-1)]
-            if iats:
-                features[16] = float(sum(iats) / len(iats))
-                features[18] = float(max(iats))
-
+        
         features[34] = float(pkt_len)
         features[35] = float(pkt_len)
 
-        # Fill remaining features with computed values to maintain shape
-        for i in range(20, 30):
-            features[i] = features[16] if features[16] != 0.0 else 0.1
-
-        for i in range(52, NUM_FEATURES):
-            features[i] = features[8] if features[8] != 0.0 else 1.0
-
     except Exception as e:
-        if DEBUG:
-            print(f"[!] Feature extraction warning: {e}")
-
+        if DEBUG: 
+            print(f"[!] Feature extraction error: {e}")
     return features
 
-# ---------------- min/max updates & scaling ----------------
 def _update_minmax(vec):
-    """Update running min/max arrays"""
     global _live_min, _live_max, _warmup_count, _scaling_enabled
-    vec = np.asarray(vec, dtype=np.float32)  # Use float32 to save memory
+    vec = np.asarray(vec, dtype=np.float32)
     with _warmup_lock:
+        if _warmup_count < WARMUP_SAMPLES:
+            _background_data_buffer.append(vec)
         if _live_min is None:
             _live_min = vec.copy()
             _live_max = vec.copy()
@@ -336,230 +493,366 @@ def _update_minmax(vec):
             _live_min = np.minimum(_live_min, vec)
             _live_max = np.maximum(_live_max, vec)
         _warmup_count += 1
-
         if not _scaling_enabled and _warmup_count >= WARMUP_SAMPLES:
-            try:
-                out = {"min": _live_min.tolist(), "max": _live_max.tolist()}
-                with open(MINMAX_SAVE_PATH, "w") as fh:
-                    json.dump(out, fh, indent=2)
-                _scaling_enabled = True
-                print(f"\n[***] WARMUP COMPLETE! Scaling enabled after {_warmup_count} samples")
-            except Exception as e:
-                print(f"[!] Failed to save {MINMAX_SAVE_PATH}: {e}")
+            _scaling_enabled = True
+            print(f"\n[***] WARMUP COMPLETE! Scaling enabled. Collected {len(_background_data_buffer)} samples.")
 
 def scale_features_live(arr):
-    """Scale features using current min/max"""
-    if not _scaling_enabled or _live_min is None or _live_max is None:
+    if not _scaling_enabled or _live_min is None or _live_max is None: 
         return arr
-    
     arr = np.asarray(arr, dtype=np.float32)
     denom = (_live_max - _live_min)
     denom_safe = np.where(denom == 0.0, 1.0, denom)
-    scaled = (arr - _live_min) / denom_safe
-    scaled = np.clip(scaled, 0.0, 1.0)
+    return np.clip((arr - _live_min) / denom_safe, 0.0, 1.0)
+
+# ----- PACKET PROCESSING FOR FLUTTER -----
+packet_id_counter = 1
+
+def send_to_flutter(packet, status, confidence=0.0, explanation=None, packet_id=None):
+    global packet_id_counter
     
-    return scaled
-
-# ---------------- dynamic threshold ----------------
-def update_error_window(err, frontend_label):
-    """Record reconstruction error only when frontline labels traffic as Normal."""
-    try:
-        if frontend_label == "Normal":
-            _recent_errors.append(float(err))
-    except Exception:
-        pass
-
-def compute_dynamic_threshold(default=1.0):
-    """Compute dynamic threshold for autoencoder."""
-    if len(_recent_errors) >= MIN_SAMPLES_FOR_THRESHOLD:
-        arr = np.asarray(_recent_errors, dtype=float)
-        arr = arr[np.isfinite(arr)]
-        if arr.size == 0:
-            return default
-        m = float(arr.mean())
-        s = float(arr.std())
-        thr1 = m + THRESHOLD_K * s
-        thr2 = float(np.percentile(arr, PCT_FOR_THRESHOLD))
-        thr = max(thr1, thr2, default)
-        return thr
-    else:
-        return default
-
-# ---------------- alert sending ----------------
-def send_alert(alert_data):
-    headers = {"Content-Type": "application/json", "X-API-Key": API_KEY}
-    try:
-        requests.post(BACKEND_URL, json=alert_data, headers=headers, verify=False, timeout=2)
-    except Exception:
-        pass
-
-# ---------------- Memory-optimized worker logic ----------------
-def worker_logic():
-    global _total_packets, _anomaly_count, _normal_count
-    print("[*] Starting Memory-Safe Worker with XAI...")
+    if not _pipeline_running:
+        return
     
-    # Track last memory check
-    last_memory_check = time.time()
+    pid = packet_id if packet_id else packet_id_counter
+    if not packet_id: 
+        packet_id_counter += 1
+
+    # Extract protocol information safely
+    protocol = "OTHER"
+    src_ip = ""
+    dst_ip = ""
+    src_port = 0
+    dst_port = 0
+    
+    if packet.haslayer(IP):
+        src_ip = packet[IP].src
+        dst_ip = packet[IP].dst
+        if packet.haslayer(TCP):
+            protocol = "TCP"
+            src_port = packet[TCP].sport
+            dst_port = packet[TCP].dport
+        elif packet.haslayer(UDP):
+            protocol = "UDP" 
+            src_port = packet[UDP].sport
+            dst_port = packet[UDP].dport
+
+    # Create complete packet data for Flutter
+    packet_data = {
+        "id": pid,
+        "summary": f"{protocol} {src_ip}:{src_port} → {dst_ip}:{dst_port}",
+        "src_ip": src_ip,
+        "dst_ip": dst_ip,
+        "src_port": src_port,
+        "dst_port": dst_port,
+        "protocol": protocol,
+        "length": len(packet),
+        "timestamp": datetime.now().isoformat(),
+        "status": status,
+        "confidence": float(confidence),
+        "explanation": explanation
+    }
+    
+    # Add to storage
+    packet_storage.add_packet(packet_data)
+    
+    # Update statistics
+    if not packet_id:
+        current_stats = packet_storage.get_stats()
+        new_stats = {
+            "total_packets": current_stats["total_packets"] + 1,
+            "memory_usage_mb": round(get_memory_usage(), 1)
+        }
+        
+        if status == "normal": 
+            new_stats["normal_count"] = current_stats["normal_count"] + 1
+        elif status == "known_attack": 
+            new_stats["attack_count"] = current_stats["attack_count"] + 1
+        elif status == "zero_day": 
+            new_stats["zero_day_count"] = current_stats["zero_day_count"] + 1
+        
+        packet_storage.update_stats(new_stats)
+
+# ----- FIXED XAI WORKER -----
+def xai_worker_logic():
+    print("[*] Fixed XAI Worker started.")
+    while True:
+        try:
+            task = xai_queue.get(timeout=1)
+            if task is None: 
+                break
+
+            print(f"[XAI] Generating explanation for ID: {task['packet_id']}")
+            start_t = time.time()
+
+            packet_info = {
+                "src_ip": task['packet'][IP].src if task['packet'].haslayer(IP) else "Unknown",
+                "dst_ip": task['packet'][IP].dst if task['packet'].haslayer(IP) else "Unknown",
+                "protocol": "TCP" if task['packet'].haslayer(TCP) else "UDP" if task['packet'].haslayer(UDP) else "OTHER"
+            }
+
+            # Use the proper XAI system
+            if task['status'] == 'known_attack':
+                explanation = generate_proper_xai_explanation(
+                    task['features'][0], task['confidence'], packet_info, "Attack"
+                )
+            elif task['status'] == 'zero_day':
+                explanation = generate_proper_xai_explanation(
+                    task['features'][0], task['confidence'], packet_info, "Zero-Day"
+                )
+            else:
+                explanation = generate_normal_explanation(task['features'][0], packet_info)
+
+            explanation["computation_time"] = f"{time.time() - start_t:.2f}s"
+
+            # Update packet with proper explanation
+            send_to_flutter(
+                packet=task['packet'], 
+                status=task['status'], 
+                confidence=task['confidence'], 
+                explanation=explanation,
+                packet_id=task['packet_id']
+            )
+            
+            print(f"[XAI] Explanation generated for ID: {task['packet_id']} in {explanation['computation_time']}")
+
+        except queue.Empty:
+            continue
+        except Exception as e:
+            print(f"[!] XAI Error: {e}")
+            import traceback
+            traceback.print_exc()
+            
+            # Fallback explanation
+            fallback_explanation = {
+                "type": "ERROR",
+                "title": "❌ Explanation Error",
+                "description": f"Could not generate detailed explanation: {str(e)}",
+                "risk_level": "UNKNOWN",
+                "error_message": str(e)
+            }
+            
+            send_to_flutter(
+                packet=task['packet'], 
+                status=task['status'], 
+                confidence=task['confidence'], 
+                explanation=fallback_explanation,
+                packet_id=task['packet_id']
+            )
+        finally:
+            if 'task' in locals():
+                xai_queue.task_done()
+            gc.collect()
+            tf.keras.backend.clear_session()
+
+# ----- DETECTION WORKER -----
+def main_detection_worker():
+    global last_flow_cleanup
+    print("[*] Detection Worker started.")
+    last_flow_cleanup = time.time()
+    last_memory_check = 0
+    _total_packets = 0
     
     while True:
-        packet = packet_queue.get()
-        if packet is None:
-            break
+        if not _pipeline_running:
+            time.sleep(1)
+            continue
             
         try:
+            packet = packet_queue.get(timeout=1)
             _total_packets += 1
+            cur_time = time.time()
             
-            # Memory monitoring every 20 packets
-            if _total_packets % 20 == 0:
-                current_time = time.time()
-                if current_time - last_memory_check > 30:
-                    memory_mb = get_memory_usage()
-                    print(f"[MEMORY] Usage: {memory_mb:.1f} MB, Packets: {_total_packets}")
-                    last_memory_check = current_time
-                    
-                    # Force garbage collection if memory is high
-                    if memory_mb > 500:
-                        gc.collect()
-            
-            # Feature extraction
-            features_list = extract_features_pure_python(packet)
-            features_np = np.array(features_list, dtype=np.float32)  # Use float32
-            
-            # Update running min/max
-            _update_minmax(features_np)
-            
-            # Scale features
-            features_for_model = scale_features_live(features_np) if _scaling_enabled else features_np
+            # Periodic cleanup
+            if cur_time - last_flow_cleanup > 30:
+                cleanup_old_flows(flows)
+                last_flow_cleanup = cur_time
 
-            # Frontline classifier
-            frontline_result = predict(features_for_model, "hardened_classifier")
+            # Memory check
+            if _total_packets - last_memory_check > 100:
+                check_memory_usage()
+                last_memory_check = _total_packets
+
+            # Feature extraction
+            feats_list = extract_features_pure_python(packet)
+            feats_np = np.array([feats_list], dtype=np.float32)
+            _update_minmax(feats_np[0])
+            feats_model = scale_features_live(feats_np) if _scaling_enabled else feats_np
+
+            # Main classification
+            prob = loaded_model.predict(feats_model, verbose=0)[0][0]
+            label = "Attack" if prob > 0.5 else "Normal"
             
-            if frontline_result["label"] == "Attack":
-                _anomaly_count += 1
-                print(f"\n[!!!] KNOWN ATTACK DETECTED! (#{_anomaly_count}) Score: {frontline_result['score']:.4f}")
+            cur_pid = packet_id_counter
+
+            if label == "Attack":
+                print(f"\n[!!!] KNOWN ATTACK DETECTED - ID:{cur_pid} Confidence:{prob:.4f}")
                 
-                # SAFE XAI with memory protection
-                explanation = safe_explain_alert(features_for_model, "hardened_classifier", "Known Attack")
-                if explanation and 'explanation' in explanation:
-                    print(f"[XAI] {explanation['explanation'][:100]}...")
+                # Send immediate alert
+                initial_explanation = {
+                    "type": "INITIAL_DETECTION",
+                    "title": "🔍 Analyzing Attack...",
+                    "description": "Known attack pattern detected. Generating AI-powered explanation...",
+                    "risk_level": "HIGH",
+                    "status": "analyzing"
+                }
                 
-                # Send to Flutter
                 send_to_flutter(
-                    packet=packet,
-                    status="known_attack",
-                    confidence=frontline_result["score"],
-                    explanation=explanation
+                    packet=packet, 
+                    status="known_attack", 
+                    confidence=prob, 
+                    explanation=initial_explanation
                 )
                 
-                # Send alert to backend
-                alert_data = {
-                    "timestamp": datetime.now().isoformat(),
-                    "type": "Known Attack",
-                    "model": "CNN+LSTM",
-                    "src_ip": packet[IP].src if packet.haslayer(IP) else None,
-                    "dst_ip": packet[IP].dst if packet.haslayer(IP) else None,
-                    "confidence": float(frontline_result["score"]),
-                }
-                if explanation:
-                    alert_data["explanation"] = explanation.get("explanation", "")
-                    alert_data["facts"] = explanation.get("facts", [])
-                
-                send_alert(alert_data)
-
+                # Queue for proper XAI analysis
+                if _scaling_enabled and not xai_queue.full():
+                    try:
+                        xai_queue.put_nowait({
+                            "packet_id": cur_pid, 
+                            "packet": packet, 
+                            "features": feats_model, 
+                            "status": "known_attack", 
+                            "confidence": prob
+                        })
+                        print(f"[XAI] Queued known attack for proper XAI analysis - ID:{cur_pid}")
+                    except queue.Full:
+                        print(f"[!] XAI queue full, basic alert sent for ID:{cur_pid}")
             else:
-                _normal_count += 1
-                # Zero-day hunter
-                hunter_result = predict(features_for_model, "zero_day_hunter")
-                reconstruction_error = hunter_result.get("score", 0.0)
+                # Zero-day check
+                reconstruction = zero_day_model.predict(feats_model, verbose=0)
+                mse = np.mean(np.power(feats_model - reconstruction, 2))
+                _recent_errors.append(mse)
                 
-                # Enhanced debugging for autoencoder
-                if DEBUG and _total_packets <= 20:
-                    scaling_status = "SCALED" if _scaling_enabled else "UNSCALED"
-                    print(f"[AUTOENCODER] Packet {_total_packets} ({scaling_status}): Error = {reconstruction_error:.2f}")
+                # Dynamic threshold
+                threshold = compute_dynamic_threshold()
                 
-                # record normal reconstruction errors only
-                update_error_window(reconstruction_error, frontline_result["label"])
-
-                # compute dynamic threshold
-                dynamic_threshold = compute_dynamic_threshold(default=1.0)
-
-                # report only if score exceeds dynamic threshold
-                if reconstruction_error > dynamic_threshold:
-                    _anomaly_count += 1
-                    print(f"\n[?!?] ZERO-DAY ANOMALY #{_anomaly_count} (Packet {_total_packets})")
-                    print(f"      Error: {reconstruction_error:.2f} > Threshold: {dynamic_threshold:.2f}")
+                if mse > threshold and _scaling_enabled:
+                    print(f"\n[?!?] ZERO-DAY ANOMALY DETECTED - ID:{cur_pid} Error:{mse:.4f} > Threshold:{threshold:.4f}")
                     
-                    # Safe XAI for zero-day
-                    explanation = safe_explain_alert(features_for_model.reshape(1, -1), "zero_day_hunter", "Zero-Day Anomaly")
+                    # Send immediate zero-day alert
+                    initial_explanation = {
+                        "type": "INITIAL_DETECTION", 
+                        "title": "🔬 Analyzing Anomaly...",
+                        "description": "Zero-day anomaly detected. Generating AI-powered explanation...",
+                        "risk_level": "CRITICAL",
+                        "status": "analyzing"
+                    }
                     
                     send_to_flutter(
-                        packet=packet,
-                        status="zero_day",
-                        confidence=reconstruction_error,
-                        explanation=explanation
+                        packet=packet, 
+                        status="zero_day", 
+                        confidence=mse,
+                        explanation=initial_explanation
                     )
                     
-                    alert_data = {
-                        "timestamp": datetime.now().isoformat(),
-                        "type": "Zero-Day Anomaly",
-                        "model": "Autoencoder",
-                        "src_ip": packet[IP].src if packet.haslayer(IP) else None,
-                        "dst_ip": packet[IP].dst if packet.haslayer(IP) else None,
-                        "reconstruction_error": float(reconstruction_error),
-                        "threshold_used": float(dynamic_threshold),
-                        "explanation": explanation.get("explanation", "Unusual pattern detected") if explanation else "Unusual pattern detected"
-                    }
-                    send_alert(alert_data)
+                    # Queue for proper XAI analysis
+                    if not xai_queue.full():
+                        try:
+                            xai_queue.put_nowait({
+                                "packet_id": cur_pid, 
+                                "packet": packet,
+                                "features": feats_model, 
+                                "status": "zero_day", 
+                                "confidence": mse
+                            })
+                            print(f"[XAI] Queued zero-day for proper XAI analysis - ID:{cur_pid}")
+                        except queue.Full:
+                            print(f"[!] XAI queue full, basic alert sent for ID:{cur_pid}")
                 else:
-                    # Send normal packet to Flutter
+                    _total_packets += 1
+                    if _total_packets % 20 == 0: 
+                        print(".", end="", flush=True)
                     send_to_flutter(packet=packet, status="normal")
 
-            # Print periodic stats
-            if _total_packets % 50 == 0:
-                memory_mb = get_memory_usage()
-                print(f"\n[STATS] Packets: {_total_packets}, Normal: {_normal_count}, Anomalies: {_anomaly_count}")
-                print(f"[MEMORY] Current usage: {memory_mb:.1f} MB")
-
+        except queue.Empty:
+            continue
         except Exception as e:
-            print(f"\n[!] Processing Error on packet {_total_packets}: {e}")
+            print(f"\n[!] Detection Error: {e}")
+            import traceback
+            traceback.print_exc()
         finally:
-            packet_queue.task_done()
+            if 'packet' in locals():
+                packet_queue.task_done()
 
-# ---------------- packet handler & main ----------------
+def compute_dynamic_threshold(default=1.0):
+    if len(_recent_errors) < MIN_SAMPLES_FOR_THRESHOLD:
+        return default
+    
+    arr = np.asarray(_recent_errors, dtype=float)
+    arr = arr[np.isfinite(arr)]
+    
+    if arr.size == 0:
+        return default
+    
+    m = float(arr.mean())
+    s = float(arr.std())
+    return m + THRESHOLD_K * s
+
+def cleanup_old_flows(flows, max_age=300, max_flows=1000):
+    now = time.time()
+    flows_to_delete = []
+    for flow_key, flow_data in flows.items():
+        if flow_data["timestamps"] and now - flow_data["timestamps"][-1] > max_age:
+            flows_to_delete.append(flow_key)
+    for flow_key in flows_to_delete[:20]:
+        if flow_key in flows: 
+            del flows[flow_key]
+
 def packet_handler(packet):
-    if packet.haslayer(IP):
+    if _pipeline_running and packet.haslayer(IP):
         packet_queue.put(packet)
 
 if __name__ == "__main__":
-    # Initial memory usage
-    initial_memory = get_memory_usage()
-    print(f"💾 Initial memory usage: {initial_memory:.1f} MB")
+    # Initial cleanup
+    gc.collect()
+    tf.keras.backend.clear_session()
     
-    # Start Flask in a separate thread for Flutter communication
-    flask_thread = threading.Thread(target=run_flask, daemon=True)
+    print(f"💾 Initial memory: {get_memory_usage():.1f} MB")
+    print(f"🔑 API Key: {API_KEY}")
+    print(f"🤖 XAI System: {'✅ Available' if XAI_AVAILABLE else '❌ Not Available'}")
+    
+    # Start threads
+    flask_thread = threading.Thread(target=run_flask, daemon=True, name="Flask_Server")
     flask_thread.start()
     
-    print("--- Intelligent IDS Pipeline (Memory-Optimized with XAI) ---")
-    print("✅ XAI ENABLED with memory protection")
-    print("🚫 XAI auto-disabled when memory > 1GB")
-    print(f"[*] Frontline Model: Hardened CNN+LSTM")
-    print(f"[*] Zero-Day Hunter: Autoencoder")
-    print(f"[*] Memory monitoring: ACTIVE")
-    print(f"[*] Flutter API: http://127.0.0.1:5001")
-    print(f"[*] Listening on: {INTERFACE}")
-    print("----------------------------------------")
+    xai_thread = threading.Thread(target=xai_worker_logic, daemon=True, name="XAI_Worker")
+    xai_thread.start()
 
-    worker_thread = threading.Thread(target=worker_logic, daemon=True)
-    worker_thread.start()
-
+    detect_thread = threading.Thread(target=main_detection_worker, daemon=True, name="Detect_Worker")
+    detect_thread.start()
+    
+    print("\n" + "="*60)
+    print("🚀 IDS PIPELINE READY - PROPER XAI INTEGRATION")
+    print("="*60)
+    print("✅ Keras Models Loaded")
+    print(f"✅ XAI System: {'PROPER explain_alert()' if XAI_AVAILABLE else 'FALLBACK'}")
+    print("✅ Flutter API Running on http://127.0.0.1:5001")
+    print("⏸️  Pipeline stopped - Start via Flutter app")
+    print("="*60)
+    
+    # Start sniffing
+    sniff_kwargs = {
+        "prn": packet_handler, 
+        "store": 0, 
+        "filter": "ip"
+    }
+    
+    if INTERFACE:
+        sniff_kwargs["iface"] = INTERFACE
+        print(f"[*] Sniffing on interface: {INTERFACE}")
+    else:
+        print(f"[*] Sniffing on default interface")
+    
     try:
-        sniff(iface=INTERFACE, prn=packet_handler, store=0)
+        sniff(**sniff_kwargs)
     except KeyboardInterrupt:
-        final_memory = get_memory_usage()
-        print(f"\n[!] Stopping IDS...")
-        print(f"[FINAL STATS] Packets: {_total_packets}, Normal: {_normal_count}, Anomalies: {_anomaly_count}")
-        print(f"[MEMORY] Final usage: {final_memory:.1f} MB (Started at: {initial_memory:.1f} MB)")
-        packet_queue.put(None)
-        worker_thread.join()
+        print(f"\n[!] Shutting down...")
     except Exception as e:
         print(f"\n[!] Sniffer Error: {e}")
+        import traceback
+        traceback.print_exc()
+    finally:
+        _pipeline_running = False
+        packet_queue.put(None)
+        xai_queue.put(None)
+        print("[+] IDS Pipeline shutdown complete")

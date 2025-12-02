@@ -7,8 +7,10 @@ class PacketList extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final provider = Provider.of<IdsProvider>(context);
+    // UPDATED: Use filteredPackets
+    final packets = provider.filteredPackets;
 
-    if (provider.packets.isEmpty) {
+    if (packets.isEmpty) {
       return Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
@@ -16,11 +18,13 @@ class PacketList extends StatelessWidget {
             Icon(Icons.lan, size: 64, color: Colors.grey[400]),
             SizedBox(height: 16),
             Text(
-              'No packets captured',
+              'No packets found', // Changed text
               style: TextStyle(color: Colors.grey[600]),
             ),
             Text(
-              'Start the pipeline to begin monitoring',
+              provider.isRunning
+                  ? 'Waiting for packets...'
+                  : 'Start the pipeline to begin monitoring',
               style: TextStyle(color: Colors.grey[500], fontSize: 12),
             ),
           ],
@@ -29,9 +33,11 @@ class PacketList extends StatelessWidget {
     }
 
     return ListView.builder(
-      itemCount: provider.packets.length,
+      // UPDATED: Use packets.length
+      itemCount: packets.length,
       itemBuilder: (context, index) {
-        final packet = provider.packets[index];
+        // UPDATED: Use packets[index]
+        final packet = packets[index];
         return PacketListItem(packet: packet);
       },
     );

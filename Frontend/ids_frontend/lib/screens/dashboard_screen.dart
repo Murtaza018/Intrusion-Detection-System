@@ -87,51 +87,94 @@ class DashboardScreen extends StatelessWidget {
     );
   }
 
-  // UPDATED: Added Zero-Day Counter
+  // UPDATED: _buildStatsGrid with clickable cards and selection highlight
   Widget _buildStatsGrid(BuildContext context) {
     final provider = Provider.of<IdsProvider>(context);
+    final currentFilter = provider.currentFilter;
 
     return Container(
       padding: EdgeInsets.all(16),
       child: Row(
         children: [
           Expanded(
-            child: StatsCard(
+            child: _buildClickableStatsCard(
+              context: context,
               title: 'TOTAL',
               value: provider.totalPackets.toString(),
               color: Colors.blue,
               icon: Icons.lan,
+              filter: 'all',
+              isSelected: currentFilter == 'all',
             ),
           ),
           SizedBox(width: 8),
           Expanded(
-            child: StatsCard(
+            child: _buildClickableStatsCard(
+              context: context,
               title: 'NORMAL',
               value: provider.normalCount.toString(),
               color: Colors.green,
               icon: Icons.check_circle,
+              filter: 'normal',
+              isSelected: currentFilter == 'normal',
             ),
           ),
           SizedBox(width: 8),
           Expanded(
-            child: StatsCard(
+            child: _buildClickableStatsCard(
+              context: context,
               title: 'ATTACKS',
               value: provider.attackCount.toString(),
               color: Colors.red,
               icon: Icons.warning,
+              filter: 'known_attack',
+              isSelected: currentFilter == 'known_attack',
             ),
           ),
           SizedBox(width: 8),
-          // ZERO-DAY COUNTER ADDED
           Expanded(
-            child: StatsCard(
+            child: _buildClickableStatsCard(
+              context: context,
               title: 'ZERO-DAY',
               value: provider.zeroDayCount.toString(),
               color: Colors.orange,
               icon: Icons.new_releases,
+              filter: 'zero_day',
+              isSelected: currentFilter == 'zero_day',
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  // NEW: Helper widget for clickable StatsCard
+  Widget _buildClickableStatsCard({
+    required BuildContext context,
+    required String title,
+    required String value,
+    required Color color,
+    required IconData icon,
+    required String filter,
+    required bool isSelected,
+  }) {
+    return InkWell(
+      onTap: () {
+        Provider.of<IdsProvider>(context, listen: false).setFilter(filter);
+      },
+      child: Container(
+        decoration: isSelected
+            ? BoxDecoration(
+                border: Border.all(color: color, width: 2),
+                borderRadius: BorderRadius.circular(8),
+              )
+            : null,
+        child: StatsCard(
+          title: title,
+          value: value,
+          color: color,
+          icon: icon,
+        ),
       ),
     );
   }

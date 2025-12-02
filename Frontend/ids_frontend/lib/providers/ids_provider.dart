@@ -46,12 +46,28 @@ class IdsProvider with ChangeNotifier {
   Set<int> _processedPacketIds =
       {}; // ADDED: Track processed IDs to prevent duplicates
 
+  // ADDED: Current filter status
+  String _currentFilter = 'all'; // 'all', 'normal', 'known_attack', 'zero_day'
+
   bool get isRunning => _isRunning;
   List<Packet> get packets => _packets;
   int get totalPackets => _totalPackets;
   int get normalCount => _normalCount;
   int get attackCount => _attackCount;
   int get zeroDayCount => _zeroDayCount;
+  // ADDED: Getter for current filter
+  String get currentFilter => _currentFilter;
+
+  // ADDED: Getter for filtered packets
+  List<Packet> get filteredPackets {
+    if (_currentFilter == 'all') {
+      return _packets;
+    } else {
+      return _packets
+          .where((packet) => packet.status == _currentFilter)
+          .toList();
+    }
+  }
 
   static const String BASE_URL = "http://127.0.0.1:5001";
 
@@ -134,7 +150,7 @@ class IdsProvider with ChangeNotifier {
   Future<void> _fetchRecentPackets() async {
     try {
       final response = await http.get(
-        Uri.parse('$BASE_URL/api/packets/recent?limit=10'), // Increased limit
+        Uri.parse('$BASE_URL/api/packets/recent?limit=100'), // Increased limit
         headers: {'X-API-Key': 'MySuperSecretKey12345!'},
       );
 
@@ -180,16 +196,11 @@ class IdsProvider with ChangeNotifier {
     }
   }
 
-  // --- Packet Management ---
   void _addPacketFromApi(Map<String, dynamic> data) {
     final int packetId = data['id'];
 
-    // IMPROVED: Use Set for faster duplicate checking
-    if (_processedPacketIds.contains(packetId)) {
-      return;
-    }
-
-    final packet = Packet(
+    // Create the new packet object from the API data
+    final newPacket = Packet(
       id: packetId,
       summary: data['summary'],
       srcIp: data['src_ip'],
@@ -204,25 +215,40 @@ class IdsProvider with ChangeNotifier {
       explanation: data['explanation'],
     );
 
-    _packets.insert(0, packet);
-    _processedPacketIds.add(packetId); // Track this ID
+    // Check if we already have this packet
+    if (_processedPacketIds.contains(packetId)) {
+      // Find the index of the existing packet
+      final index = _packets.indexWhere((p) => p.id == packetId);
+      if (index != -1) {
+        // Check if the explanation has changed. If so, update the packet.
+        // We use jsonEncode to compare the maps conveniently.
+        if (jsonEncode(_packets[index].explanation) !=
+            jsonEncode(newPacket.explanation)) {
+          print("[FLUTTER] Updating explanation for packet #$packetId");
+          _packets[index] = newPacket;
+          notifyListeners(); // Trigger UI rebuild
+        }
+      }
+      return; // Exit after updating or if no update was needed
+    }
 
-    // Note: We're letting backend stats be the source of truth
-    // but we'll still update locally for immediate UI feedback
+    // If it's a new packet, add it to the list
+    _packets.insert(0, newPacket);
+    _processedPacketIds.add(packetId);
+
+    // Update local stats for immediate feedback
     _totalPackets++;
-
-    if (packet.status == 'normal') {
+    if (newPacket.status == 'normal') {
       _normalCount++;
-    } else if (packet.status == 'known_attack') {
+    } else if (newPacket.status == 'known_attack') {
       _attackCount++;
-    } else if (packet.status == 'zero_day') {
+    } else if (newPacket.status == 'zero_day') {
       _zeroDayCount++;
     }
 
-    // ADDED: Limit packets list to prevent memory issues
+    // Memory management: Limit list size
     if (_packets.length > 200) {
       _packets = _packets.sublist(0, 100);
-      // Also clean up processed IDs to prevent memory leaks
       final recentIds = _packets.map((p) => p.id).toSet();
       _processedPacketIds = _processedPacketIds.intersection(recentIds);
     }
@@ -284,6 +310,14 @@ class IdsProvider with ChangeNotifier {
       print('Error fetching pipeline status: $e');
     }
     return null;
+  }
+
+  // ADDED: Method to set the filter
+  void setFilter(String filter) {
+    if (_currentFilter != filter) {
+      _currentFilter = filter;
+      notifyListeners();
+    }
   }
 
   @override

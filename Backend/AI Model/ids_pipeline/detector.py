@@ -4,6 +4,7 @@
 import numpy as np
 import threading
 import queue
+import traceback
 
 # --- FIX: Import Packet class ---
 from packet_storage import Packet
@@ -31,6 +32,10 @@ class Detector:
         
     def start(self):
         """Start detection threads"""
+        # Clear queues to prevent "poison pill" issues on restart
+        self.packet_queue = queue.Queue()
+        self.xai_queue = queue.Queue(maxsize=5)
+        
         self.running = True
         
         # Start XAI worker thread
@@ -125,7 +130,6 @@ class Detector:
                 continue
             except Exception as e:
                 print(f"\n[!] Detection error: {e}")
-                import traceback
                 traceback.print_exc()
     
     def _xai_worker(self):
@@ -133,8 +137,6 @@ class Detector:
         print("[*] XAI worker started")
         
         main_model = self.model_loader.get_main_model()
-
-        # --- REMOVED: The problematic import was here ---
         
         while self.running:
             try:
@@ -162,7 +164,6 @@ class Detector:
                                 self.xai_explainer.background_data.append(scaled_sample.flatten())
                         
                         # Now try to initialize SHAP
-                        # initialize_shap uses the same lock internally.
                         self.xai_explainer.initialize_shap(main_model.predict, num_samples=BACKGROUND_SUMMARY_SIZE)
                     else:
                         # Not enough samples yet, generate_explanation will use fallback
@@ -197,7 +198,6 @@ class Detector:
                 continue
             except Exception as e:
                 print(f"[!] XAI error: {e}")
-                import traceback
                 traceback.print_exc()
     
     def _handle_known_attack(self, packet, packet_id, features, confidence, packet_info):

@@ -4,7 +4,14 @@
 import numpy as np
 import threading
 import queue
+
+# --- FIX: Import Packet class ---
 from packet_storage import Packet
+# --------------------------------
+
+# --- FIX: Move this import to the top level ---
+from config import BACKGROUND_SUMMARY_SIZE
+# ----------------------------------------------
 
 class Detector:
     """Main detection logic"""
@@ -126,6 +133,8 @@ class Detector:
         print("[*] XAI worker started")
         
         main_model = self.model_loader.get_main_model()
+
+        # --- REMOVED: The problematic import was here ---
         
         while self.running:
             try:
@@ -135,10 +144,30 @@ class Detector:
                 
                 print(f"[XAI] Processing ID:{task['packet_id']}")
                 
-                # Add background sample for SHAP if needed
+                # Attempt to initialize SHAP if needed, using data from FeatureExtractor
                 if not self.xai_explainer.initialized:
-                    self.xai_explainer.add_background_sample(task['features'].flatten())
-                
+                    # Get unscaled background samples from FeatureExtractor
+                    bg_samples_unscaled = self.feature_extractor.get_background_samples()
+                    
+                    if len(bg_samples_unscaled) >= BACKGROUND_SUMMARY_SIZE:
+                        print(f"[XAI] Populating background data from FeatureExtractor with {len(bg_samples_unscaled)} samples for SHAP initialization.")
+                        
+                        # Use a lock when modifying XAIExplainer's background_data
+                        with self.xai_explainer.lock:
+                            self.xai_explainer.background_data.clear()
+                            for sample in bg_samples_unscaled:
+                                # sample is (n_features,) unscaled. Scale it.
+                                scaled_sample = self.feature_extractor.scale_features(sample)
+                                # scaled_sample is (1, n_features) scaled. Flatten and add.
+                                self.xai_explainer.background_data.append(scaled_sample.flatten())
+                        
+                        # Now try to initialize SHAP
+                        # initialize_shap uses the same lock internally.
+                        self.xai_explainer.initialize_shap(main_model.predict, num_samples=BACKGROUND_SUMMARY_SIZE)
+                    else:
+                        # Not enough samples yet, generate_explanation will use fallback
+                        print(f"[XAI] Not enough background samples in FeatureExtractor ({len(bg_samples_unscaled)}/{BACKGROUND_SUMMARY_SIZE}) for SHAP initialization yet. Using fallback explanation.")
+
                 # Generate explanation
                 explanation = self.xai_explainer.generate_explanation(
                     features=task['features'].flatten(),

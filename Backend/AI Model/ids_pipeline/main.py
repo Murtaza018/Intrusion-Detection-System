@@ -5,11 +5,12 @@ import sys
 import os
 import signal
 import time
+import threading
 
 # Add parent directory to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from config import BASE_DIR
+from config import BASE_DIR, FLASK_HOST, FLASK_PORT, NETWORK_INTERFACE
 from model_loader import ModelLoader
 from feature_extractor import FeatureExtractor
 from xai_explainer import XAIExplainer
@@ -35,13 +36,15 @@ def main():
     detector = Detector(model_loader, feature_extractor, xai_explainer, packet_storage)
     
     # Create pipeline manager
+    # Pass NETWORK_INTERFACE here
     pipeline_manager = PipelineManager(
         model_loader=model_loader,
         feature_extractor=feature_extractor,
         xai_explainer=xai_explainer,
         packet_storage=packet_storage,
         detector=detector,
-        api_server=None  # Will be set after creation
+        api_server=None,  # Will be set after creation
+        interface=NETWORK_INTERFACE # <--- NEW
     )
     
     # Create API server
@@ -69,13 +72,18 @@ def main():
     print("\n⚠️  IMPORTANT: Pipeline will start when Flutter app sends start command")
     print("="*60)
     
-    # --- REMOVED AUTOMATIC START ---
-    # pipeline_manager.start()
-    # -------------------------------
+    # Start Flask server explicitly
+    flask_thread = threading.Thread(
+        target=api_server.run,
+        args=(FLASK_HOST, FLASK_PORT),
+        daemon=True,
+        name="Flask_Server"
+    )
+    flask_thread.start()
     
-    # Start sniffing (packets will be processed when pipeline is running)
-    # This is okay to start now, as it checks self.running
-    pipeline_manager.start_sniffing()
+    # --- REMOVED start_sniffing() CALL ---
+    # It is now called inside pipeline_manager.start()
+    # -------------------------------------
     
     # Keep main thread alive
     try:

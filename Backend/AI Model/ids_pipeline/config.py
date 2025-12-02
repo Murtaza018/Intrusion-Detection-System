@@ -6,6 +6,8 @@ import os
 # Base directory
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
+NETWORK_INTERFACE = "Wi-Fi 2"
+
 # Model paths
 MAIN_MODEL_REL_PATH = os.path.join("Adversarial Attack and Defense", "cicids_spatiotemporal_model_hardened.keras")
 AUTOENCODER_REL_PATH = os.path.join("Autoencoder", "cicids_autoencoder.keras")

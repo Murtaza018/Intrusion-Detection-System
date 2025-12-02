@@ -3,6 +3,7 @@ import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'dart:async';
 
+// --- Packet Data Model ---
 class Packet {
   final int id;
   final String summary;
@@ -33,6 +34,7 @@ class Packet {
   });
 }
 
+// --- IDS Provider ---
 class IdsProvider with ChangeNotifier {
   bool _isRunning = false;
   List<Packet> _packets = [];
@@ -53,6 +55,7 @@ class IdsProvider with ChangeNotifier {
 
   static const String BASE_URL = "http://127.0.0.1:5001";
 
+  // --- Pipeline Control ---
   Future<void> startPipeline() async {
     if (_isRunning) return; // ADDED: Prevent multiple starts
 
@@ -102,6 +105,7 @@ class IdsProvider with ChangeNotifier {
     }
   }
 
+  // --- Data Polling ---
   void _startRealPacketStream() {
     _packetTimer?.cancel();
 
@@ -176,6 +180,7 @@ class IdsProvider with ChangeNotifier {
     }
   }
 
+  // --- Packet Management ---
   void _addPacketFromApi(Map<String, dynamic> data) {
     final int packetId = data['id'];
 

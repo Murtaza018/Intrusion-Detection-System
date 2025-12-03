@@ -1,7 +1,5 @@
 # train_cgan.py
-# Description: This script builds and trains a Conditional GAN (CGAN).
-# UPDATE: Implements "One-Sided Label Smoothing" to fix the Discriminator Overpowering problem.
-# We use 0.9 instead of 1.0 for real labels to stabilize training.
+# Robust CGAN Training with LeakyReLU, BatchNormalization, and Dropout
 
 import numpy as np
 import tensorflow as tf
@@ -9,119 +7,162 @@ from tensorflow import keras
 from tensorflow.keras import layers
 import os
 
-print("--- Training a Conditional GAN (CGAN) with Label Smoothing ---")
+print("--- Training a Robust Conditional GAN (CGAN) ---")
 
 # --- Configuration ---
 DATA_PATH = "../Preprocessing/CGAN/CGAN_preprocessed_data/"
-LATENT_DIM = 128    # Input dimension for the random noise
-DATA_DIM = 78       # Number of features in our dataset
-NUM_CLASSES = 15    # Number of classes
-EPOCHS = 50         # Reduced to 50 for this attempt
-BATCH_SIZE = 256
+LATENT_DIM = 128
+DATA_DIM = 78
+NUM_CLASSES = 15
+EPOCHS = 100        # Full training duration
+BATCH_SIZE = 128    # Batch size
+LEARNING_RATE = 0.0002 
+BETA_1 = 0.5        # Adam Beta1 (Crucial for GAN stability)
 
-# --- Step 1: Load the Multi-Class Preprocessed Data ---
-print(f"\n[*] Loading the CGAN-preprocessed dataset from '{DATA_PATH}'...")
+# --- Step 1: Load Data ---
+print(f"\n[*] Loading dataset from '{DATA_PATH}'...")
 try:
     X_train = np.load(DATA_PATH + 'X_full.npy')
     y_train = np.load(DATA_PATH + 'y_full.npy')
     print(f"[+] Dataset loaded: {len(X_train):,} samples.")
 except FileNotFoundError:
-    print(f"\n[!] Error: I couldn't find the processed data files at '{DATA_PATH}'.")
-    print("[!] Please run 'preprocess_cgan.py' first.")
+    print(f"[!] Error: Data not found at '{DATA_PATH}'")
     exit()
 
-# Convert labels to one-hot encoding for the model
+# One-hot encode labels
 y_train_one_hot = tf.keras.utils.to_categorical(y_train, num_classes=NUM_CLASSES)
 
-# --- Step 2: Build the Generator ---
-print("[*] Building the Generator model...")
-noise_input = layers.Input(shape=(LATENT_DIM,), name="noise_input")
-label_input = layers.Input(shape=(NUM_CLASSES,), name="label_input")
-merged_input = layers.concatenate([noise_input, label_input])
+# --- Step 2: Build Generator (Robust Architecture) ---
+def build_generator():
+    noise = layers.Input(shape=(LATENT_DIM,))
+    label = layers.Input(shape=(NUM_CLASSES,))
+    
+    # Merge noise and label
+    x = layers.concatenate([noise, label])
+    
+    # Layer 1
+    x = layers.Dense(256)(x)
+    x = layers.BatchNormalization(momentum=0.8)(x)
+    x = layers.LeakyReLU(alpha=0.2)(x)
+    
+    # Layer 2
+    x = layers.Dense(512)(x)
+    x = layers.BatchNormalization(momentum=0.8)(x)
+    x = layers.LeakyReLU(alpha=0.2)(x)
+    
+    # Layer 3 (Deep layer for full dataset)
+    x = layers.Dense(1024)(x)
+    x = layers.BatchNormalization(momentum=0.8)(x)
+    x = layers.LeakyReLU(alpha=0.2)(x)
+    
+    # Output Layer
+    # We use 'sigmoid' because your data check confirmed it is [0, 1]
+    output = layers.Dense(DATA_DIM, activation='sigmoid')(x) 
+    
+    model = keras.Model([noise, label], output, name="generator")
+    return model
 
-gen = layers.Dense(128, activation="relu")(merged_input)
-gen = layers.Dense(256, activation="relu")(gen)
-gen = layers.Dense(512, activation="relu")(gen)
-gen = layers.Dense(DATA_DIM, activation="sigmoid")(gen)
-
-generator = keras.Model([noise_input, label_input], gen, name="generator")
+generator = build_generator()
+print("\n[*] Generator Built:")
 generator.summary()
 
-# --- Step 3: Build the Discriminator ---
-print("\n[*] Building the Discriminator model...")
-data_input = layers.Input(shape=(DATA_DIM,), name="data_input")
-label_input_d = layers.Input(shape=(NUM_CLASSES,), name="label_input_d")
-merged_input_d = layers.concatenate([data_input, label_input_d])
+# --- Step 3: Build Discriminator (Robust Architecture) ---
+def build_discriminator():
+    img = layers.Input(shape=(DATA_DIM,))
+    label = layers.Input(shape=(NUM_CLASSES,))
+    
+    x = layers.concatenate([img, label])
+    
+    # Layer 1
+    x = layers.Dense(512)(x)
+    x = layers.LeakyReLU(alpha=0.2)(x)
+    x = layers.Dropout(0.4)(x) 
+    
+    # Layer 2
+    x = layers.Dense(256)(x)
+    x = layers.LeakyReLU(alpha=0.2)(x)
+    x = layers.Dropout(0.4)(x)
+    
+    # Layer 3
+    x = layers.Dense(128)(x)
+    x = layers.LeakyReLU(alpha=0.2)(x)
+    
+    # Output
+    output = layers.Dense(1, activation='sigmoid')(x)
+    
+    model = keras.Model([img, label], output, name="discriminator")
+    
+    # Compile
+    opt = keras.optimizers.Adam(learning_rate=LEARNING_RATE, beta_1=BETA_1)
+    model.compile(loss='binary_crossentropy', optimizer=opt, metrics=['accuracy'])
+    return model
 
-disc = layers.Dense(512, activation="relu")(merged_input_d)
-disc = layers.Dense(256, activation="relu")(disc)
-disc = layers.Dense(128, activation="relu")(disc)
-disc = layers.Dense(1, activation="sigmoid")(disc)
-
-discriminator = keras.Model([data_input, label_input_d], disc, name="discriminator")
-discriminator.compile(optimizer="adam", loss="binary_crossentropy", metrics=["accuracy"])
+discriminator = build_discriminator()
+print("\n[*] Discriminator Built:")
 discriminator.summary()
 
-# --- Step 4: Build the Combined CGAN Model ---
+# --- Step 4: Build Combined Model ---
 discriminator.trainable = False
-noise, label = generator.inputs
-gen_output = generator.outputs[0]
-gan_output = discriminator([gen_output, label])
-cgan = keras.Model([noise, label], gan_output, name="cgan")
-cgan.compile(optimizer="adam", loss="binary_crossentropy")
-print("\n[*] Building the combined CGAN model...")
-cgan.summary()
+noise = layers.Input(shape=(LATENT_DIM,))
+label = layers.Input(shape=(NUM_CLASSES,))
+img = generator([noise, label])
+valid = discriminator([img, label])
 
-# --- Step 5: Train the CGAN ---
-print("\n--- Starting CGAN Training (Stabilized) ---")
+cgan = keras.Model([noise, label], valid)
+opt_gan = keras.optimizers.Adam(learning_rate=LEARNING_RATE, beta_1=BETA_1)
+cgan.compile(loss='binary_crossentropy', optimizer=opt_gan)
 
-# ** THE FIX: Label Smoothing **
-# Instead of 1.0, we use 0.9 for real labels. This prevents the discriminator
-# from becoming too confident and killing the gradients.
-real_labels_y = np.ones((BATCH_SIZE, 1)) * 0.9 
-fake_labels_y = np.zeros((BATCH_SIZE, 1))
+# --- Step 5: Training Loop ---
+print("\n--- Starting Full CGAN Training ---")
+
+# Labels for training (with smoothing for real labels)
+real_labels = np.ones((BATCH_SIZE, 1)) * 0.9 
+fake_labels = np.zeros((BATCH_SIZE, 1))
 
 num_batches = X_train.shape[0] // BATCH_SIZE
 
 for epoch in range(EPOCHS):
-    print(f"\n--- Epoch {epoch+1}/{EPOCHS} ---")
-    
+    print(f"Epoch {epoch+1}/{EPOCHS}")
     for i in range(num_batches):
-        # --- 1. Train the Discriminator ---
+        
+        # ---------------------
+        #  Train Discriminator
+        # ---------------------
+        
+        # Select random real samples
         idx = np.random.randint(0, X_train.shape[0], BATCH_SIZE)
-        real_samples = X_train[idx]
-        real_labels = y_train_one_hot[idx]
+        imgs, labels = X_train[idx], y_train_one_hot[idx]
         
+        # Generate fake samples
         noise = np.random.normal(0, 1, (BATCH_SIZE, LATENT_DIM))
-        fake_labels = tf.keras.utils.to_categorical(
-            np.random.randint(0, NUM_CLASSES, BATCH_SIZE), num_classes=NUM_CLASSES
-        )
-        fake_samples = generator.predict([noise, fake_labels], verbose=0)
+        # Randomly sample labels for the fake data
+        sampled_labels_indices = np.random.randint(0, NUM_CLASSES, BATCH_SIZE)
+        sampled_labels = tf.keras.utils.to_categorical(sampled_labels_indices, NUM_CLASSES)
         
-        discriminator.trainable = True
-        d_loss_real = discriminator.train_on_batch([real_samples, real_labels], real_labels_y)
-        d_loss_fake = discriminator.train_on_batch([fake_samples, fake_labels], fake_labels_y)
+        gen_imgs = generator.predict([noise, sampled_labels], verbose=0)
+        
+        # Train
+        d_loss_real = discriminator.train_on_batch([imgs, labels], real_labels)
+        d_loss_fake = discriminator.train_on_batch([gen_imgs, sampled_labels], fake_labels)
         d_loss = 0.5 * np.add(d_loss_real, d_loss_fake)
         
-        # --- 2. Train the Generator ---
+        # ---------------------
+        #  Train Generator
+        # ---------------------
+        
         noise = np.random.normal(0, 1, (BATCH_SIZE, LATENT_DIM))
-        trick_labels = tf.keras.utils.to_categorical(
-            np.random.randint(0, NUM_CLASSES, BATCH_SIZE), num_classes=NUM_CLASSES
-        )
+        # We want the discriminator to mistake these as real (label=1.0)
+        valid_y = np.ones((BATCH_SIZE, 1))
         
-        discriminator.trainable = False
-        # Ideally, we want the discriminator to think these are REAL (1.0, not 0.9)
-        # when training the generator, to push it towards perfection.
-        valid_y = np.ones((BATCH_SIZE, 1)) 
-        g_loss = cgan.train_on_batch([noise, trick_labels], valid_y)
+        # Train
+        g_loss = cgan.train_on_batch([noise, sampled_labels], valid_y)
         
-        if i % 200 == 0:
-            print(f"    Batch {i}/{num_batches}  [D loss: {d_loss[0]:.4f}, acc: {d_loss[1]*100:.2f}%]  [G loss: {g_loss:.4f}]")
+        if i % 100 == 0:
+             print(f"  Batch {i}/{num_batches} [D loss: {d_loss[0]:.4f}, acc: {d_loss[1]*100:.2f}%] [G loss: {g_loss:.4f}]")
 
-    # Save the generator model after each epoch
+    # Save model checkpoint
     generator.save(f"cgan_generator_epoch_{epoch+1}.keras")
-    print(f"[+] Saved generator model for epoch {epoch+1}")
+    print(f"[+] Saved checkpoint: cgan_generator_epoch_{epoch+1}.keras")
 
-print("\n--- CGAN Training Complete! ---")
+print("\n--- Training Complete! ---")
 generator.save("cgan_generator_final.keras")
-print("[*] Final generator model saved as 'cgan_generator_final.keras'")

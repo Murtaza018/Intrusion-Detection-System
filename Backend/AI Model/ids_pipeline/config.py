@@ -11,6 +11,12 @@ NETWORK_INTERFACE = "Wi-Fi 2"
 # Model paths
 MAIN_MODEL_REL_PATH = os.path.join("Adversarial Attack and Defense", "cicids_spatiotemporal_model_hardened.keras")
 AUTOENCODER_REL_PATH = os.path.join("Autoencoder", "cicids_autoencoder.keras")
+RF_MODEL_PATH = os.path.join("XGBoost and Random Forest","models_ensemble", "rf_model.joblib")
+XGB_MODEL_PATH = os.path.join("XGBoost and Random Forest","models_ensemble", "xgb_model.joblib")
+
+# Resolve absolute paths for them
+RF_MODEL_ABS_PATH = os.path.join(BASE_DIR, RF_MODEL_PATH) # Adjust based on where you put the folder
+XGB_MODEL_ABS_PATH = os.path.join(BASE_DIR, XGB_MODEL_PATH)
 MAIN_MODEL_ABS_PATH = os.path.join(BASE_DIR, MAIN_MODEL_REL_PATH)
 AUTOENCODER_ABS_PATH = os.path.join(BASE_DIR, AUTOENCODER_REL_PATH)
 

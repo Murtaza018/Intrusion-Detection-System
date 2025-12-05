@@ -94,15 +94,25 @@ class Detector:
                 if self.feature_extractor.is_scaling_enabled():
                     # Get models
                     main_model = self.model_loader.get_main_model()
+                    rf_model = self.model_loader.get_rf_model()
+                    xgb_model = self.model_loader.get_xgb_model()
                     autoencoder = self.model_loader.get_autoencoder_model()
+
+                    cnn_prob = main_model.predict(scaled_features, verbose=0)[0][0]
                     
-                    # Main model prediction
-                    prob = main_model.predict(scaled_features, verbose=0)[0][0]
+                    # 2. RF Prediction (predict_proba returns [prob_0, prob_1])
+                    # We need prob_1 (Attack probability)
+                    rf_prob = rf_model.predict_proba(scaled_features)[0][1]
                     
-                    if prob > 0.5:
+                    # 3. XGB Prediction
+                    xgb_prob = xgb_model.predict_proba(scaled_features)[0][1]
+                    
+                    # 4. Weighted Soft Vote
+                    ensemble_prob = (cnn_prob + rf_prob + xgb_prob) / 3.0
+                    if ensemble_prob > 0.5:
                         # Known attack
-                        print(f"\n[!!!] KNOWN ATTACK - ID:{packet_id} Confidence:{prob:.4f}")
-                        self._handle_known_attack(packet, packet_id, scaled_features, prob, packet_info)
+                        print(f"\n[!!!] KNOWN ATTACK - ID:{packet_id} Confidence:{ensemble_prob:.4f}")
+                        self._handle_known_attack(packet, packet_id, scaled_features, ensemble_prob, packet_info)
                     else:
                         # Check for zero-day
                         reconstruction = autoencoder.predict(scaled_features, verbose=0)

@@ -1,0 +1,10 @@
+The Full Workflow
+Phase 1 (Now): Train cgan_generator_final.keras on the full 2017 dataset. This is your Base Model.
+
+Phase 2 (Deployment): Your IDS runs. One day, it catches a weird packet and flags it as Zero-Day.
+
+Phase 3 (Capture): You click "Generate Variants" in the Flutter app. The backend saves those few packets to zeroday_seed.npy.
+
+Phase 4 (Adaptation): The backend loads your Base Model, trains it for just a few minutes on zeroday_seed.npy, and produces a Specialized Generator.
+
+Phase 5 (Generation): This specialized generator creates 5,000 synthetic variants of that Zero-Day for your CNN to train on.

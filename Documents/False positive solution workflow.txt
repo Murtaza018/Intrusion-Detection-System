@@ -1,0 +1,40 @@
+The "Immunization" Workflow (For False Positives)
+The goal is to teach your models: "I know this looks like an attack, but in my network, this is actually normal."
+
+1. The Trigger: Human Feedback
+Action: You see a packet in the Flutter dashboard flagged as "Known Attack" or "Zero-Day," but you know it's safe (e.g., it's just your Netflix stream).
+
+Input: You press the "Report False Positive" button (which we added earlier).
+
+Data: The backend receives the packet ID and retrieves the 78 features.
+
+2. The Amplification: Jittering (Noise Injection)
+We can't retrain a model on just one packet effectively. It might memorize that single packet but fail on the very next one that is 0.001% different. We need to create a "safety bubble" around that packet.
+
+Process: Instead of a GAN (which is overkill here), we use Jittering.
+
+Logic: We take the reported packet and generate 1,000 variations by adding tiny amounts of random noise.
+
+Result: We now have a dataset of 1,000 "Verified Normal" packets that represent that specific behavior (e.g., "High-Bandwidth UDP").
+
+3. The Retraining: "Fine-Tuning"
+We update both models very gently.
+
+For the Autoencoder (The Zero-Day Detector):
+
+Current State: It thinks this packet is "anomalous" (high reconstruction error).
+
+Action: Train it on the 1,000 new normal packets for 1-2 epochs.
+
+Result: It learns to reconstruct this pattern accurately. The error drops, and it stops flagging similar packets as Zero-Day.
+
+For the CNN (The Classifier):
+
+Current State: It classifies this pattern as Class 1 (Attack).
+
+Action: Train it on the 1,000 new normal packets with Label = 0 (Normal).
+
+Result: The decision boundary shifts. It learns that this specific "spiky" traffic pattern belongs to the Safe class.
+
+Why this is better than using a GAN here
+For "Normal" traffic, Jittering is superior to a GAN because you want the model to learn that the specific thing it just saw is normal. A GAN might drift and generate traffic that is too different. You want to force the model to accept exactly what the user just flagged, plus a tiny margin of error.

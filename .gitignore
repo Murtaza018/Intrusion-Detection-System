@@ -27,3 +27,5 @@ dist/
 
 # Ignore cryptographic private keys and build artifacts
 *.pem
+
+*.joblib

@@ -107,7 +107,7 @@ class PipelineManager:
         # Packet handler
         def packet_handler(packet):
             if self.running:
-                # print(".", end="", flush=True) # Uncomment to see every packet
+                print(packet.summary())
                 self.detector.process_packet(packet)
         
         # Start sniffing in background thread

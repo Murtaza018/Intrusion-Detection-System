@@ -99,23 +99,45 @@ class Detector:
                     autoencoder = self.model_loader.get_autoencoder_model()
 
                     cnn_prob = main_model.predict(scaled_features, verbose=0)[0][0]
-                    
-                    # 2. RF Prediction (Multi-Class)
-                    # Calculate "Attack Probability" as "1 - Normal Probability"
-                    # We assume Index 0 is "Benign/Normal"
+
                     rf_all_probs = self.model_loader.get_rf_model().predict_proba(scaled_features)[0]
                     rf_prob = 1.0 - rf_all_probs[0]
-                    
-                    # 3. XGB Prediction (Multi-Class)
+
                     xgb_all_probs = self.model_loader.get_xgb_model().predict_proba(scaled_features)[0]
                     xgb_prob = 1.0 - xgb_all_probs[0]
-                    
-                    # 4. Weighted Soft Vote
-                    ensemble_prob = max(cnn_prob + rf_prob + xgb_prob) / 3.0
-                    if cnn_prob > 0.5 or rf_prob > 0.5 or xgb_prob > 0.5 or packet_id % 50 == 0:
-                        print(f"[VOTE] ID:{packet_id} | CNN:{cnn_prob:.2f} RF:{rf_prob:.2f} XGB:{xgb_prob:.2f} | AVG:{ensemble_prob:.2f}")
 
-                    if ensemble_prob > 0.5:
+                    # ----- Ensemble configuration (tunable) -----
+                    W_CNN = 0.6    # weight for CNN
+                    W_RF  = 0.25   # weight for RF
+                    W_XGB = 0.15   # weight for XGBoost
+
+                    HIGH_CONF_OVERRIDE = 0.90  # if any model >= this, auto‑attack
+                    ENSEMBLE_THRESH    = 0.50  # main threshold for ensemble (tune later)
+                    # --------------------------------------------
+
+                    # High‑confidence override: any model very sure -> trust it
+                    high_conf = max(cnn_prob, rf_prob, xgb_prob)
+                    if high_conf >= HIGH_CONF_OVERRIDE:
+                        ensemble_prob = high_conf
+                        is_attack = True
+                    else:
+                        # Weighted soft voting
+                        ensemble_prob = (
+                            W_CNN * cnn_prob +
+                            W_RF  * rf_prob +
+                            W_XGB * xgb_prob
+                        )
+                        is_attack = ensemble_prob >= ENSEMBLE_THRESH
+
+                    # Debug logging
+                    if cnn_prob > 0.5 or rf_prob > 0.5 or xgb_prob > 0.5 or packet_id % 50 == 0:
+                        print(
+                            f"[VOTE] ID:{packet_id} | "
+                            f"CNN:{cnn_prob:.2f} RF:{rf_prob:.2f} XGB:{xgb_prob:.2f} | "
+                            f"ENS:{ensemble_prob:.2f} (HC:{high_conf:.2f})"
+                        )
+
+                    if is_attack:
                         # Known attack
                         print(f"\n[!!!] KNOWN ATTACK - ID:{packet_id} Confidence:{ensemble_prob:.4f}")
                         self._handle_known_attack(packet, packet_id, scaled_features, ensemble_prob, packet_info)

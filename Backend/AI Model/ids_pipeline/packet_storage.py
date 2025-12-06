@@ -65,7 +65,7 @@ class PacketStorage:
             self.packets = deque([p for p in self.packets if p.id != packet_data.id], maxlen=self.max_size)
             self.packets.appendleft(packet_data)
 
-    def get_packets(self, limit=None):
+    def get_packets(self, limit=10000):
         """Get packets with optional limit"""
         with self.lock:
             packets = list(self.packets)

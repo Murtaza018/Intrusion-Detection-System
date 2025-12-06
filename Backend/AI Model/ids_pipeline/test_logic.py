@@ -1,7 +1,7 @@
 from scapy.all import rdpcap, send, IP, TCP, UDP, conf
 import os
 
-PCAP_FILE = "D:\Wednesday-WorkingHours.pcap"
+PCAP_FILE = "D:/Wednesday-WorkingHours.pcap"
 TARGET_IP = "8.8.8.8" # Route to internet so adapter accepts it
 
 if not os.path.exists(PCAP_FILE):
@@ -9,7 +9,7 @@ if not os.path.exists(PCAP_FILE):
     exit()
 
 print(f"[*] Reading {PCAP_FILE}...")
-packets = rdpcap(PCAP_FILE, count=5000) # Load 5000 packets
+packets = rdpcap(PCAP_FILE, count=300) # Load 5000 packets
 print(f"[+] Loaded {len(packets)} packets. Preparing to blast...")
 
 clean_packets = []

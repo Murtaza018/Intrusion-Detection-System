@@ -30,7 +30,7 @@ def main():
     model_loader = ModelLoader()
     feature_extractor = FeatureExtractor()
     xai_explainer = XAIExplainer()
-    packet_storage = PacketStorage(max_size=1000)
+    packet_storage = PacketStorage(max_size=100000)
     
     # Create detector
     detector = Detector(model_loader, feature_extractor, xai_explainer, packet_storage)

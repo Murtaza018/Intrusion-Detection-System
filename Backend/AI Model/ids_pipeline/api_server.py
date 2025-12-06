@@ -81,7 +81,7 @@ class APIServer:
         @self.app.route("/api/packets/recent", methods=['GET'])
         @require_api_key
         def get_recent_packets():
-            limit = request.args.get('limit', default=10, type=int)
+            limit = request.args.get('limit', default=10000, type=int)
             packets = self.packet_storage.get_packets(limit=limit)
             
             return jsonify({

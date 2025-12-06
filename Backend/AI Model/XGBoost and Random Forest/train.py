@@ -1,96 +1,142 @@
-# train_ensemble.py
-# Trains Random Forest and XGBoost models for the Hybrid Ensemble IDS
+import os
+import time
+import joblib
+import warnings
+warnings.filterwarnings("ignore")
 
 import numpy as np
-import os
-import joblib
-import time
 from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, classification_report
 from xgboost import XGBClassifier
-from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
-from sklearn.model_selection import train_test_split
 
-print("--- 🚀 Initializing Ensemble Training ---")
+# =====================================================
+# Helpers
+# =====================================================
 
-# --- CONFIGURATION ---
-# Adjust this path to match where your .npy files are!
-# Based on your previous messages, it seems to be here:
-DATA_PATH = "../Preprocessing/CGAN/CGAN_preprocessed_data/" 
+def load_data():
+    print("\n[*] Loading processed CIC-IDS-2017 data...")
+    
+    # Check if files exist to prevent obscure errors
+    base_path = "../Preprocessing/CIC-IDS-2017/CIC-IDS-2017-Processed/"
+    if not os.path.exists(base_path):
+        print(f"[!] Error: Path {base_path} not found.")
+        return None, None, None, None, None, None
 
-MODELS_DIR = "./models_ensemble"
-os.makedirs(MODELS_DIR, exist_ok=True)
+    X_train = np.load(os.path.join(base_path, "X_train.npy"))
+    y_train = np.load(os.path.join(base_path, "y_train.npy"))
+    X_val   = np.load(os.path.join(base_path, "X_val.npy"))
+    y_val   = np.load(os.path.join(base_path, "y_val.npy"))
+    X_test  = np.load(os.path.join(base_path, "X_test.npy"))
+    y_test  = np.load(os.path.join(base_path, "y_test.npy"))
 
-# --- 1. LOAD DATA ---
-print(f"\n[*] Loading dataset from {DATA_PATH}...")
-try:
-    X = np.load(os.path.join(DATA_PATH, 'X_full.npy'))
-    y = np.load(os.path.join(DATA_PATH, 'y_full.npy'))
-    print(f"[+] Dataset loaded: {len(X):,} samples.")
-except FileNotFoundError:
-    print(f"[!] CRITICAL ERROR: Could not find .npy files in {DATA_PATH}")
-    exit()
+    print(f"[+] Loaded train: X={X_train.shape}, y={y_train.shape}")
+    print(f"[+] Loaded val:   X={X_val.shape}, y={y_val.shape}")
+    print(f"[+] Loaded test:  X={X_test.shape}, y={y_test.shape}")
+    print(f"[INFO] Number of classes: {len(np.unique(y_train))}")
 
-# Split data for validation (important to check accuracy!)
-print("[*] Splitting data 80/20...")
-X_train, X_val, y_train, y_val = train_test_split(X, y, test_size=0.2, random_state=42)
+    return X_train, y_train, X_val, y_val, X_test, y_test
 
-# --- 2. TRAIN RANDOM FOREST ---
-print("\n" + "="*40)
-print("🌲 Training Random Forest...")
-print("="*40)
-start_time = time.time()
 
-# Optimizing for speed: n_jobs=-1 uses all CPU cores
-rf_model = RandomForestClassifier(
-    n_estimators=100, 
-    max_depth=20, 
-    n_jobs=-1, 
-    random_state=42,
-    verbose=1
-)
-rf_model.fit(X_train, y_train)
+def evaluate(model, X, y, label="TEST"):
+    preds = model.predict(X)
 
-print(f"[+] Random Forest trained in {time.time() - start_time:.2f}s")
+    # Use 'weighted' average to handle both Binary and Multiclass safely
+    # If strictly binary, 'binary' is default, but 'weighted' works for both without crashing
+    acc  = accuracy_score(y, preds)
+    prec = precision_score(y, preds, average='weighted', zero_division=0)
+    rec  = recall_score(y, preds, average='weighted', zero_division=0)
+    f1   = f1_score(y, preds, average='weighted', zero_division=0)
 
-# Evaluate
-val_preds = rf_model.predict(X_val)
-acc = accuracy_score(y_val, val_preds)
-print(f"[RESULT] Random Forest Accuracy: {acc:.4f}")
+    print(f"[RESULT] {label}: Acc={acc:.4f}  Prec={prec:.4f}  Rec={rec:.4f}  F1={f1:.4f}")
+    
+    # Optional: Print full report for detailed class breakdown
+    # print(classification_report(y, preds))
 
-# Save
-rf_path = os.path.join(MODELS_DIR, "rf_model.joblib")
-joblib.dump(rf_model, rf_path)
-print(f"[+] Saved to: {rf_path}")
 
-# --- 3. TRAIN XGBOOST ---
-print("\n" + "="*40)
-print("🚀 Training XGBoost...")
-print("="*40)
-start_time = time.time()
+def print_header(text):
+    print("\n" + "="*40)
+    print(text)
+    print("="*40)
 
-# Tree method 'hist' is much faster for large datasets
-xgb_model = XGBClassifier(
-    n_estimators=100,
-    max_depth=10,
-    learning_rate=0.1,
-    tree_method='hist', 
-    device='cuda' if os.environ.get('CUDA_VISIBLE_DEVICES') else 'cpu', # Use GPU if available
-    random_state=42
-)
-xgb_model.fit(X_train, y_train)
 
-print(f"[+] XGBoost trained in {time.time() - start_time:.2f}s")
+# =====================================================
+# Main
+# =====================================================
 
-# Evaluate
-val_preds = xgb_model.predict(X_val)
-acc = accuracy_score(y_val, val_preds)
-print(f"[RESULT] XGBoost Accuracy: {acc:.4f}")
+if __name__ == "__main__":
 
-# Save
-xgb_path = os.path.join(MODELS_DIR, "xgb_model.joblib")
-joblib.dump(xgb_model, xgb_path)
-print(f"[+] Saved to: {xgb_path}")
+    print("\n--- 🚀 Initializing Ensemble Training (RF + XGB on CIC-IDS-2017-Processed) ---")
 
-print("\n" + "="*40)
-print("🎉 ENSEMBLE TRAINING COMPLETE!")
-print("="*40)
+    X_train, y_train, X_val, y_val, X_test, y_test = load_data()
+    
+    if X_train is None:
+        exit(1)
+
+    os.makedirs("models_ensemble", exist_ok=True)
+
+    # =====================================================
+    # 🌲 TRAIN RANDOM FOREST
+    # =====================================================
+    print_header("🌲 Training Random Forest...")
+
+    # Note: verbose=2 allows you to see progress inside the model training
+    rf = RandomForestClassifier(
+        n_estimators=200,
+        max_depth=None,
+        n_jobs=1,       # Increase this (e.g., -1) for faster training if consistency isn't critical
+        verbose=2       # Logic change: Built-in logging is better than a manual loop
+    )
+
+    start = time.time()
+    rf.fit(X_train, y_train)
+    end = time.time()
+
+    print(f"\n[+] Random Forest trained in {end-start:.2f}s")
+
+    print("[Random Forest Evaluation]")
+    evaluate(rf, X_val, y_val, "VAL")
+    evaluate(rf, X_test, y_test, "TEST")
+
+    joblib.dump(rf, "./models_ensemble/rf_model.joblib")
+    print("[+] RF model saved to: ./models_ensemble/rf_model.joblib")
+
+    # =====================================================
+    # 🚀 TRAIN XGBOOST
+    # =====================================================
+    print_header("🚀 Training XGBoost...")
+
+    xgb = XGBClassifier(
+        objective='binary:logistic', # Ensure your labels are 0 and 1. If multiclass, use 'multi:softmax'
+        eval_metric='logloss',
+        n_estimators=200,
+        learning_rate=0.05,
+        max_depth=6,
+        subsample=0.8,
+        colsample_bytree=0.8,
+        tree_method='hist',
+        n_jobs=1,
+        # verbosity=1 will print warnings/info. 
+        # XGBoost doesn't support a simple CLI progress bar easily without callback functions,
+        # but 'verbose=True' in fit() prints evaluation metric history.
+    )
+
+    start = time.time()
+    
+    # We pass eval_set to monitor performance during training, ensuring it's actually learning
+    xgb.fit(
+        X_train, y_train, 
+        eval_set=[(X_val, y_val)], 
+        verbose=False  # Set to True if you want to see logloss decrease every iteration
+    )
+    
+    end = time.time()
+    print(f"[+] XGBoost trained in {end-start:.2f}s\n")
+
+    print("[XGBoost Evaluation]")
+    evaluate(xgb, X_val, y_val, "VAL")
+    evaluate(xgb, X_test, y_test, "TEST")
+
+    joblib.dump(xgb, "./models_ensemble/xgb_model.joblib")
+    print("[+] XGB model saved to: ./models_ensemble/xgb_model.joblib")
+
+    print("\n🎉 TRAINING COMPLETE: Both RF + XGB models saved!\n")

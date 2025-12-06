@@ -100,15 +100,21 @@ class Detector:
 
                     cnn_prob = main_model.predict(scaled_features, verbose=0)[0][0]
                     
-                    # 2. RF Prediction (predict_proba returns [prob_0, prob_1])
-                    # We need prob_1 (Attack probability)
-                    rf_prob = rf_model.predict_proba(scaled_features)[0][1]
+                    # 2. RF Prediction (Multi-Class)
+                    # Calculate "Attack Probability" as "1 - Normal Probability"
+                    # We assume Index 0 is "Benign/Normal"
+                    rf_all_probs = self.model_loader.get_rf_model().predict_proba(scaled_features)[0]
+                    rf_prob = 1.0 - rf_all_probs[0]
                     
-                    # 3. XGB Prediction
-                    xgb_prob = xgb_model.predict_proba(scaled_features)[0][1]
+                    # 3. XGB Prediction (Multi-Class)
+                    xgb_all_probs = self.model_loader.get_xgb_model().predict_proba(scaled_features)[0]
+                    xgb_prob = 1.0 - xgb_all_probs[0]
                     
                     # 4. Weighted Soft Vote
-                    ensemble_prob = (cnn_prob + rf_prob + xgb_prob) / 3.0
+                    ensemble_prob = max(cnn_prob + rf_prob + xgb_prob) / 3.0
+                    if cnn_prob > 0.5 or rf_prob > 0.5 or xgb_prob > 0.5 or packet_id % 50 == 0:
+                        print(f"[VOTE] ID:{packet_id} | CNN:{cnn_prob:.2f} RF:{rf_prob:.2f} XGB:{xgb_prob:.2f} | AVG:{ensemble_prob:.2f}")
+
                     if ensemble_prob > 0.5:
                         # Known attack
                         print(f"\n[!!!] KNOWN ATTACK - ID:{packet_id} Confidence:{ensemble_prob:.4f}")

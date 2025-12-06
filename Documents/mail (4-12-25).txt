@@ -1,0 +1,80 @@
+1. Things we have done and don't need to change
+These elements are already implemented in your project and align well with the "Future Directions" or methodologies described in the provided texts.
+
+Explainable AI (XAI) Integration (Topic 2 & 3):
+
+Text Reference: "Integrating SHAP or LIME modules to interpret predictions" and "Enhancing transparency and interpretability."
+
+Your Project: You have fully integrated SHAP (KernelExplainer). Your system explains exactly why a packet was flagged (e.g., "Increased risk: Flow Duration").
+
+Visualization Dashboards (Topic 3):
+
+Text Reference: "Build explainability dashboards that show feature contribution to each alert in real time."
+
+Your Project: Your Flutter Frontend does exactly this. It displays packets in real-time, shows risk levels, and visualizes top contributing factors with color-coded indicators.
+
+Handling Data Imbalance (Topic 2):
+
+Text Reference: "It uses SMOTE for imbalance."
+
+Your Project: You went a step further. Instead of standard SMOTE, you implemented a WGAN-GP (Generative Adversarial Network) to generate synthetic zero-day attacks. This is a more advanced method of handling imbalance and data augmentation.
+
+Anomaly-Based Detection (Topic 1 & 2):
+
+Text Reference: Uses "Autoencoders" for detection.
+
+Your Project: You have a dedicated Autoencoder model specifically for detecting Zero-Day anomalies based on reconstruction error thresholds.
+
+2. Things we have done but done "incorrectly" (or differently) and should change/evolve
+These are areas where we have a foundation, but the provided text suggests a more advanced or automated approach that we should consider adopting to match State-of-the-Art (SOTA).
+
+Continual Learning Loop (Topic 1):
+
+Text Reference: "Real-time continual learning loop that updates on streaming network traffic."
+
+Current Status: We have the components (WGAN for generation, "Report False Positive" button), but the actual loop is manual.
+
+Change Needed: We need to automate the pipeline so that when the analyst verifies a Zero-Day or False Positive, the system automatically triggers the fine_tune and retrain scripts without you running them manually.
+
+User Feedback Loop (Topic 3):
+
+Text Reference: "Allow security operators to provide feedback on explanations, improving model over time."
+
+Current Status: We added the "Report False Positive" button in the UI, but currently, it just logs to a text file (false_positives.log).
+
+Change Needed: This needs to connect to the "Immunization" workflow we discussed (Jittering -> Retraining) to actually improve the model, not just log the error.
+
+The Detection Model Architecture (Topic 2):
+
+Text Reference: "Hybrid ensemble system combining XGBoost, Random Forest, GNN, LSTM, and Autoencoders... employs weighted soft-voting."
+
+Current Status: We use a sequential pipeline (CNN -> Autoencoder).
+
+Change Needed: To match this research, we would need to move from a single CNN classifier to an Ensemble. However, this is a major architectural change. A middle ground would be adding an LSTM or XGBoost model alongside your CNN and averaging their predictions (Voting) to improve accuracy.
+
+3. Things we have NOT done
+These are concepts from the text that are completely absent from our current architecture.
+
+Tabular-to-Image Transformation with MAE (Topic 1 - SAFE):
+
+Concept: Converting the 78 traffic features into an image format and using Masked Autoencoders (like in computer vision) to find anomalies.
+
+Status: We treat data as tabular vectors. We have not explored image conversion.
+
+Graph Neural Networks (GNN) (Topic 2):
+
+Concept: Modeling network traffic as a graph (nodes = IP addresses, edges = flows) and using GNNs to detect attacks based on the topology and relationships between devices.
+
+Status: Our models look at single packets/flows in isolation. We do not analyze the graph structure of the network.
+
+PCA-based Novelty Detection (Topic 1 - CND-IDS):
+
+Concept: Using Principal Component Analysis (PCA) to flag novel attacks.
+
+Status: We use a Deep Autoencoder for this. (Note: Deep Autoencoders are often considered superior to PCA for complex non-linear data, so we might not want to do this, but we haven't done it).
+
+Edge Deployment Optimization (Topic 1 & 2):
+
+Concept: Adapting models to run on routers or gateways with limited resources.
+
+Status: We are running on a PC/Laptop using full TensorFlow/Keras. We have not converted models to TensorFlow Lite (TFLite) or optimized them for low-power edge devices.

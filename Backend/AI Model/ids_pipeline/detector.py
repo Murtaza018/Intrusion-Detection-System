@@ -111,27 +111,24 @@ class Detector:
                     W_RF  = 0.25   # weight for RF
                     W_XGB = 0.15   # weight for XGBoost
 
-                    HIGH_CONF_OVERRIDE = 0.90  # if any model >= this, auto‑attack
+                    # HIGH_CONF_OVERRIDE = 0.90  # if any model >= this, auto‑attack
                     ENSEMBLE_THRESH    = 0.50  # main threshold for ensemble (tune later)
                     # --------------------------------------------
 
                     # High‑confidence override: any model very sure -> trust it
                     high_conf = max(cnn_prob, rf_prob, xgb_prob)
-                    if high_conf >= HIGH_CONF_OVERRIDE:
+                    # Only override if at least two models high and agree on attack
+                    high_attack_votes = sum(p >= 0.9 for p in [cnn_prob, rf_prob, xgb_prob])
+                    if high_attack_votes >= 2:
                         ensemble_prob = high_conf
                         is_attack = True
                     else:
-                        # Weighted soft voting
-                        ensemble_prob = (
-                            W_CNN * cnn_prob +
-                            W_RF  * rf_prob +
-                            W_XGB * xgb_prob
-                        )
+                        ensemble_prob = W_CNN*cnn_prob + W_RF*rf_prob + W_XGB*xgb_prob
                         is_attack = ensemble_prob >= ENSEMBLE_THRESH
 
+
                     # Debug logging
-                    if cnn_prob > 0.5 or rf_prob > 0.5 or xgb_prob > 0.5 or packet_id % 50 == 0:
-                        print(
+                    print(
                             f"[VOTE] ID:{packet_id} | "
                             f"CNN:{cnn_prob:.2f} RF:{rf_prob:.2f} XGB:{xgb_prob:.2f} | "
                             f"ENS:{ensemble_prob:.2f} (HC:{high_conf:.2f})"

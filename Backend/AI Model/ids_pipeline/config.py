@@ -7,6 +7,7 @@ import os
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 NETWORK_INTERFACE = "Wi-Fi 2"
+# NETWORK_INTERFACE = r"\Device\NPF_{98FACC85-B69E-4177-BBBF-0F143020C5D2}"
 
 # Model paths
 MAIN_MODEL_REL_PATH = os.path.join("Adversarial Attack and Defense", "cicids_spatiotemporal_model_hardened.keras")

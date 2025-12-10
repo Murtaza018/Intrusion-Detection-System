@@ -2,24 +2,71 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/ids_provider.dart';
 import '../widgets/packet_list.dart';
-import '../widgets/stats_card.dart';
+import 'adaptation_screen.dart'; // Ensure this import exists
 
 class DashboardScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
+    // We listen here to rebuild the counts/buttons when data changes
+    final provider = Provider.of<IdsProvider>(context);
+
     return Scaffold(
+      backgroundColor: Colors.grey[100],
       appBar: AppBar(
-        title: Text('IDS Pipeline Monitor'),
-        backgroundColor: Colors.blue[800],
-        foregroundColor: Colors.white,
+        elevation: 0,
+        title: Text(
+          'IDS Monitor',
+          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 22),
+        ),
+        backgroundColor: Colors.white,
+        foregroundColor: Colors.black87,
+        actions: [
+          // ADAPT BUTTON (New: Shows when packets are selected)
+          if (provider.totalSelected > 0)
+            Padding(
+              padding: const EdgeInsets.only(right: 8.0),
+              child: FilledButton.icon(
+                onPressed: () => Navigator.push(context,
+                    MaterialPageRoute(builder: (_) => AdaptationScreen())),
+                icon: Icon(Icons.build, size: 18),
+                label: Text("Adapt (${provider.totalSelected})"),
+                style: FilledButton.styleFrom(
+                  backgroundColor: Colors.deepPurple,
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8)),
+                ),
+              ),
+            ),
+
+          // POWER BUTTON
+          _buildPowerButton(context, provider),
+          SizedBox(width: 16),
+        ],
       ),
       body: Column(
         children: [
-          // Control Panel
-          _buildControlPanel(context),
+          // Compact Stats Row
+          Container(
+            color: Colors.white,
+            padding: EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+            child: Row(
+              children: [
+                _buildCompactStat(context, 'Total', provider.totalPackets,
+                    Colors.blue, 'all'),
+                SizedBox(width: 12),
+                _buildCompactStat(context, 'Normal', provider.normalCount,
+                    Colors.green, 'normal'),
+                SizedBox(width: 12),
+                _buildCompactStat(context, 'Attacks', provider.attackCount,
+                    Colors.red, 'known_attack'),
+                SizedBox(width: 12),
+                _buildCompactStat(context, 'Zero-Day', provider.zeroDayCount,
+                    Colors.orange, 'zero_day'),
+              ],
+            ),
+          ),
 
-          // Statistics with ZERO-DAY COUNTER
-          _buildStatsGrid(context),
+          Divider(height: 1),
 
           // Packet List
           Expanded(
@@ -29,151 +76,89 @@ class DashboardScreen extends StatelessWidget {
       ),
       floatingActionButton: FloatingActionButton(
         onPressed: () => _showAddPacketDialog(context),
-        child: Icon(Icons.add_alert),
-        tooltip: 'Simulate Alert',
+        backgroundColor: Colors.blue[700],
+        foregroundColor: Colors.white,
+        child: Icon(Icons.bug_report),
+        tooltip: 'Simulate Zero-Day',
       ),
     );
   }
 
-  Widget _buildControlPanel(BuildContext context) {
-    final provider = Provider.of<IdsProvider>(context);
-
+  // A sleek Power Button
+  Widget _buildPowerButton(BuildContext context, IdsProvider provider) {
+    bool isRunning = provider.isRunning;
     return Container(
-      padding: EdgeInsets.all(16),
-      color: Colors.grey[50],
-      child: Row(
-        children: [
-          Expanded(
-            child: ElevatedButton(
-              onPressed:
-                  provider.isRunning ? null : () => provider.startPipeline(),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.green,
-                foregroundColor: Colors.white,
-                padding: EdgeInsets.symmetric(vertical: 16),
-              ),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(Icons.play_arrow),
-                  SizedBox(width: 8),
-                  Text('START PIPELINE'),
-                ],
-              ),
-            ),
-          ),
-          SizedBox(width: 12),
-          Expanded(
-            child: ElevatedButton(
-              onPressed:
-                  provider.isRunning ? () => provider.stopPipeline() : null,
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.red,
-                foregroundColor: Colors.white,
-                padding: EdgeInsets.symmetric(vertical: 16),
-              ),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(Icons.stop),
-                  SizedBox(width: 8),
-                  Text('STOP PIPELINE'),
-                ],
-              ),
-            ),
-          ),
-        ],
+      margin: EdgeInsets.symmetric(vertical: 8),
+      child: ElevatedButton.icon(
+        onPressed: () {
+          if (isRunning) {
+            provider.stopPipeline();
+          } else {
+            provider.startPipeline();
+          }
+        },
+        icon: Icon(isRunning ? Icons.stop : Icons.play_arrow),
+        label: Text(isRunning ? 'STOP' : 'START'),
+        style: ElevatedButton.styleFrom(
+          backgroundColor: isRunning ? Colors.red[50] : Colors.green[50],
+          foregroundColor: isRunning ? Colors.red : Colors.green,
+          elevation: 0,
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          padding: EdgeInsets.symmetric(horizontal: 16),
+        ),
       ),
     );
   }
 
-  // UPDATED: _buildStatsGrid with clickable cards and selection highlight
-  Widget _buildStatsGrid(BuildContext context) {
-    final provider = Provider.of<IdsProvider>(context);
-    final currentFilter = provider.currentFilter;
+  // FIX: Compact Stat Widget (Self-Contained Provider Logic)
+  Widget _buildCompactStat(BuildContext context, String label, int value,
+      Color color, String filter) {
+    // 1. Listen to filter changes to highlight selection
+    final currentFilter = Provider.of<IdsProvider>(context).currentFilter;
+    bool isSelected = currentFilter == filter;
 
-    return Container(
-      padding: EdgeInsets.all(16),
-      child: Row(
-        children: [
-          Expanded(
-            child: _buildClickableStatsCard(
-              context: context,
-              title: 'TOTAL',
-              value: provider.totalPackets.toString(),
-              color: Colors.blue,
-              icon: Icons.lan,
-              filter: 'all',
-              isSelected: currentFilter == 'all',
-            ),
+    return Expanded(
+      child: InkWell(
+        // 2. Use listen: false for the action (Fixes the error)
+        onTap: () =>
+            Provider.of<IdsProvider>(context, listen: false).setFilter(filter),
+        borderRadius: BorderRadius.circular(12),
+        child: AnimatedContainer(
+          duration: Duration(milliseconds: 200),
+          padding: EdgeInsets.symmetric(vertical: 12, horizontal: 4),
+          decoration: BoxDecoration(
+            color: isSelected ? color.withOpacity(0.1) : Colors.grey[50],
+            border: Border.all(
+                color: isSelected ? color : Colors.transparent, width: 2),
+            borderRadius: BorderRadius.circular(12),
           ),
-          SizedBox(width: 8),
-          Expanded(
-            child: _buildClickableStatsCard(
-              context: context,
-              title: 'NORMAL',
-              value: provider.normalCount.toString(),
-              color: Colors.green,
-              icon: Icons.check_circle,
-              filter: 'normal',
-              isSelected: currentFilter == 'normal',
-            ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                value.toString(),
+                style: TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.w800,
+                  color: color,
+                ),
+              ),
+              SizedBox(height: 4),
+              Text(
+                label.toUpperCase(),
+                style: TextStyle(
+                  fontSize: 10,
+                  fontWeight: FontWeight.w600,
+                  color: Colors.grey[600],
+                  letterSpacing: 0.5,
+                ),
+                textAlign: TextAlign.center,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ],
           ),
-          SizedBox(width: 8),
-          Expanded(
-            child: _buildClickableStatsCard(
-              context: context,
-              title: 'ATTACKS',
-              value: provider.attackCount.toString(),
-              color: Colors.red,
-              icon: Icons.warning,
-              filter: 'known_attack',
-              isSelected: currentFilter == 'known_attack',
-            ),
-          ),
-          SizedBox(width: 8),
-          Expanded(
-            child: _buildClickableStatsCard(
-              context: context,
-              title: 'ZERO-DAY',
-              value: provider.zeroDayCount.toString(),
-              color: Colors.orange,
-              icon: Icons.new_releases,
-              filter: 'zero_day',
-              isSelected: currentFilter == 'zero_day',
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // NEW: Helper widget for clickable StatsCard
-  Widget _buildClickableStatsCard({
-    required BuildContext context,
-    required String title,
-    required String value,
-    required Color color,
-    required IconData icon,
-    required String filter,
-    required bool isSelected,
-  }) {
-    return InkWell(
-      onTap: () {
-        Provider.of<IdsProvider>(context, listen: false).setFilter(filter);
-      },
-      child: Container(
-        decoration: isSelected
-            ? BoxDecoration(
-                border: Border.all(color: color, width: 2),
-                borderRadius: BorderRadius.circular(8),
-              )
-            : null,
-        child: StatsCard(
-          title: title,
-          value: value,
-          color: color,
-          icon: icon,
         ),
       ),
     );
@@ -187,17 +172,19 @@ class DashboardScreen extends StatelessWidget {
       builder: (context) => AlertDialog(
         title: Text('Simulate Alert'),
         content: Text('Add a simulated zero-day attack packet for testing?'),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: Text('Cancel'),
+            child: Text('Cancel', style: TextStyle(color: Colors.grey)),
           ),
-          TextButton(
+          FilledButton(
             onPressed: () {
               provider.addZeroDayPacket();
               Navigator.pop(context);
             },
-            child: Text('Add'),
+            style: FilledButton.styleFrom(backgroundColor: Colors.orange),
+            child: Text('Simulate'),
           ),
         ],
       ),

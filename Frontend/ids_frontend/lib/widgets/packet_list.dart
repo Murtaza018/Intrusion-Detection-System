@@ -7,7 +7,6 @@ class PacketList extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final provider = Provider.of<IdsProvider>(context);
-    // UPDATED: Use filteredPackets
     final packets = provider.filteredPackets;
 
     if (packets.isEmpty) {
@@ -15,30 +14,28 @@ class PacketList extends StatelessWidget {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(Icons.lan, size: 64, color: Colors.grey[400]),
+            Icon(Icons.lan, size: 64, color: Colors.grey[300]),
             SizedBox(height: 16),
-            Text(
-              'No packets found', // Changed text
-              style: TextStyle(color: Colors.grey[600]),
-            ),
-            Text(
-              provider.isRunning
-                  ? 'Waiting for packets...'
-                  : 'Start the pipeline to begin monitoring',
-              style: TextStyle(color: Colors.grey[500], fontSize: 12),
-            ),
+            Text('No packets found', style: TextStyle(color: Colors.grey[500])),
           ],
         ),
       );
     }
 
     return ListView.builder(
-      // UPDATED: Use packets.length
-      itemCount: packets.length,
+      itemCount: packets.length + 1,
       itemBuilder: (context, index) {
-        // UPDATED: Use packets[index]
-        final packet = packets[index];
-        return PacketListItem(packet: packet);
+        if (index == packets.length) {
+          return Padding(
+            padding: EdgeInsets.all(16.0),
+            child: provider.isLoadingMore
+                ? Center(child: CircularProgressIndicator())
+                : TextButton(
+                    onPressed: () => provider.loadMorePackets(),
+                    child: Text("Load Older Packets")),
+          );
+        }
+        return PacketListItem(packet: packets[index]);
       },
     );
   }
@@ -51,6 +48,9 @@ class PacketListItem extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final provider = Provider.of<IdsProvider>(context);
+    bool isSelected = provider.isSelected(packet.id);
+
     Color statusColor;
     IconData statusIcon;
     String statusText;
@@ -59,7 +59,7 @@ class PacketListItem extends StatelessWidget {
       case 'known_attack':
         statusColor = Colors.red;
         statusIcon = Icons.warning;
-        statusText = 'KNOWN ATTACK';
+        statusText = 'ATTACK';
         break;
       case 'zero_day':
         statusColor = Colors.orange;
@@ -73,43 +73,35 @@ class PacketListItem extends StatelessWidget {
     }
 
     return Card(
+      elevation: isSelected ? 4 : 1,
+      // Highlight color if selected
+      color: isSelected ? Colors.deepPurple.shade50 : Colors.white,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: isSelected
+            ? BorderSide(color: Colors.deepPurple, width: 2)
+            : BorderSide.none,
+      ),
       margin: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       child: ListTile(
         leading: Icon(statusIcon, color: statusColor),
-        title: Text(
-          packet.summary,
-          style: TextStyle(fontWeight: FontWeight.w500),
-        ),
-        subtitle: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('${packet.srcIp} → ${packet.dstIp}'),
-            Text(
-              '${packet.protocol} • ${packet.length} bytes • ${_formatTime(packet.timestamp)}',
-              style: TextStyle(fontSize: 12, color: Colors.grey[600]),
-            ),
-          ],
-        ),
+        title:
+            Text(packet.summary, style: TextStyle(fontWeight: FontWeight.w500)),
+        subtitle:
+            Text('${packet.srcIp} → ${packet.dstIp} • ${packet.protocol}'),
         trailing: Chip(
-          label: Text(
-            statusText,
-            style: TextStyle(color: Colors.white, fontSize: 10),
-          ),
+          label: Text(statusText,
+              style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 10,
+                  fontWeight: FontWeight.bold)),
           backgroundColor: statusColor,
+          padding: EdgeInsets.zero,
         ),
-        onTap: () => _showPacketDetails(context, packet),
+        onTap: () => showDialog(
+            context: context,
+            builder: (_) => PacketDetailDialog(packet: packet)),
       ),
-    );
-  }
-
-  String _formatTime(DateTime timestamp) {
-    return '${timestamp.hour.toString().padLeft(2, '0')}:${timestamp.minute.toString().padLeft(2, '0')}:${timestamp.second.toString().padLeft(2, '0')}';
-  }
-
-  void _showPacketDetails(BuildContext context, Packet packet) {
-    showDialog(
-      context: context,
-      builder: (context) => PacketDetailDialog(packet: packet),
     );
   }
 }

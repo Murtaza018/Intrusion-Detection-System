@@ -1,128 +1,71 @@
-# evaluate_cgan_local.py
-# Script to evaluate CGAN checkpoints locally in VS Code
+# check_gan.py
+# Verifies that the Generator can load and produce valid traffic.
 
+import os
 import numpy as np
 import tensorflow as tf
 from tensorflow.keras.models import load_model
 import pandas as pd
-import os
 
 # --- CONFIGURATION ---
-# Path to the model you want to test (Relative to this script)
-# Matches the save path from train_cgan_local.py
-MODEL_NAME = "./Models/cgan_generator_epoch_1.keras"
-NUM_SAMPLES = 10
+# Path to your BEST model (Epoch 3)
+MODEL_PATH = "cgan_generator.keras" 
+LATENT_DIM = 128
+NUM_CLASSES = 15
+NUM_SAMPLES = 5
 
-def evaluate_generator():
-    # Verify file exists locally
-    if not os.path.exists(MODEL_NAME):
-        print(f"[!] Error: Could not find model file at: {os.path.abspath(MODEL_NAME)}")
-        print("    Make sure the training script has finished at least 1 epoch.")
+def check_model():
+    print(f"[*] Loading model from: {MODEL_PATH}")
+    
+    if not os.path.exists(MODEL_PATH):
+        print(f"[!] Error: Model not found at {MODEL_PATH}")
         return
 
-    print(f"[*] Loading generator from {MODEL_NAME}...")
     try:
-        generator = load_model(MODEL_NAME)
+        # Load the Generator
+        # compile=False is important because we don't need the optimizer/loss to just generate
+        generator = load_model(MODEL_PATH, compile=False)
         print("[+] Model loaded successfully.")
-    except Exception as e:
-        print(f"[!] Failed to load model: {e}")
-        return
-
-    # --- AUTO-DETECT INPUT SHAPES ---
-    print("\n[*] Inspecting Model Inputs...")
-    try:
-        input_shapes = generator.input_shape
-        print(f"    Model expects: {input_shapes}")
-
-        # Defaults
-        latent_dim = 100
-        label_dim = 1
-        noise_idx = 0
-        label_idx = 1
-
-        # Logic to determine which input is noise vs label
-        if isinstance(input_shapes, (list, tuple)) and len(input_shapes) == 2:
-            shape1 = input_shapes[0] # e.g. (None, 128)
-            shape2 = input_shapes[1] # e.g. (None, 15)
-            
-            # Handle None dimensions
-            dim1 = shape1[1]
-            dim2 = shape2[1]
-            
-            # The larger dimension is usually the latent noise
-            if dim1 > dim2:
-                latent_dim = dim1
-                label_dim = dim2
-                noise_idx = 0
-                label_idx = 1
-            else:
-                latent_dim = dim2
-                label_dim = dim1
-                noise_idx = 1
-                label_idx = 0
-                
-            print(f"    -> Detected Latent Dim: {latent_dim} (Input {noise_idx})")
-            print(f"    -> Detected Label Dim:  {label_dim} (Input {label_idx})")
+        
+        # 1. Prepare Noise (Latent Vector)
+        noise = tf.random.normal(shape=(NUM_SAMPLES, LATENT_DIM))
+        
+        # 2. Prepare Condition (Label)
+        # Let's ask for class 1 (Assuming 1 = Attack, but depends on your encoding)
+        # If your training data was one-hot encoded, we need a vector of 15 zeros with one 1.
+        labels = np.zeros((NUM_SAMPLES, NUM_CLASSES))
+        labels[:, 1] = 1.0  # Set Class 1
+        
+        print(f"[*] Generating {NUM_SAMPLES} samples for Class 1...")
+        
+        # 3. Generate
+        generated_data = generator.predict([noise, labels], verbose=0)
+        
+        # 4. Analysis
+        print("\n--- 📊 Generated Data Analysis ---")
+        print(f"Shape: {generated_data.shape} (Should be [{NUM_SAMPLES}, 78])")
+        
+        # Convert to DataFrame for easier viewing
+        df = pd.DataFrame(generated_data)
+        
+        print("\n[Sample 1 Features (First 10)]:")
+        print(df.iloc[0, :10].values)
+        
+        print("\n[Statistics]:")
+        print(f"Min Value: {df.min().min():.4f} (Should be close to 0)")
+        print(f"Max Value: {df.max().max():.4f} (Should be close to 1)")
+        print(f"Mean Value: {df.mean().mean():.4f}")
+        
+        # Check for Mode Collapse (Are all rows identical?)
+        std_dev = df.std().mean()
+        print(f"\n[Diversity Score]: {std_dev:.4f}")
+        if std_dev < 0.01:
+            print("[!] WARNING: Diversity is very low. Model might have collapsed.")
         else:
-            print("[!] Could not auto-detect multiple inputs. Using default (100).")
+            print("[✅] Diversity looks healthy.")
 
     except Exception as e:
-        print(f"[!] Inspection failed: {e}")
-        return
-
-    print(f"\n[*] Generating {NUM_SAMPLES} synthetic 'Normal' packets...")
-    
-    # 1. Prepare Noise
-    random_latent_vectors = tf.random.normal(shape=(NUM_SAMPLES, latent_dim))
-    
-    # 2. Prepare Labels (One-Hot Encoded if dim > 1)
-    if label_dim > 1:
-        # Assuming Class 0 is "Normal"
-        labels = np.zeros((NUM_SAMPLES, label_dim))
-        labels[:, 0] = 1 
-        print(f"    -> Created One-Hot Encoded labels for Class 0 (Normal)")
-    else:
-        # Binary classification
-        labels = tf.zeros((NUM_SAMPLES, 1))
-        print(f"    -> Created Binary labels (0)")
-
-    # 3. Arrange Inputs correctly
-    inputs = [None, None]
-    inputs[noise_idx] = random_latent_vectors
-    inputs[label_idx] = labels
-
-    # 4. Generate
-    try:
-        generated_data = generator.predict(inputs, verbose=0)
-    except Exception as e:
-        print(f"\n[!] Generation failed!")
-        print(f"    Error details: {e}")
-        return
-
-    # 5. Analyze Results
-    print("\n" + "="*50)
-    print("ANALYSIS OF GENERATED PACKETS")
-    print("="*50)
-    
-    df = pd.DataFrame(generated_data)
-    
-    print(f"1. Value Range Check:")
-    print(f"   Min Value: {df.min().min():.4f}")
-    print(f"   Max Value: {df.max().max():.4f}")
-
-    print(f"\n2. Variance Check (Mode Collapse detection):")
-    std_dev = df.std().mean()
-    print(f"   Avg Feature Std Dev: {std_dev:.4f}")
-    
-    if std_dev < 0.01:
-        print("   [!] WARNING: Very low variance. Model suffers from MODE COLLAPSE.")
-        print("       It is generating the same packet repeatedly.")
-    else:
-        print("   [OK] Variance looks healthy.")
-
-    print(f"\n3. Sample Output (First 3 packets, first 5 features):")
-    print(df.iloc[:3, :5].to_string())
-    print("\n" + "="*50)
+        print(f"[!] Error testing model: {e}")
 
 if __name__ == "__main__":
-    evaluate_generator()
+    check_model()

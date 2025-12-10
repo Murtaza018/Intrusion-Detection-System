@@ -2,9 +2,14 @@
 # Configuration settings for the IDS pipeline
 
 import os
+from dotenv import load_dotenv
 
 # Base directory
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+PROJECT_ROOT = os.path.dirname(os.path.dirname(BASE_DIR))
+# Load environment variables from .env file
+# We look for .env in the project root (one level up from ids_pipeline)
+load_dotenv(os.path.join(PROJECT_ROOT, ".env"))
 
 NETWORK_INTERFACE = "Wi-Fi 2"
 # NETWORK_INTERFACE = r"\Device\NPF_{98FACC85-B69E-4177-BBBF-0F143020C5D2}"
@@ -14,6 +19,13 @@ MAIN_MODEL_REL_PATH = os.path.join("Adversarial Attack and Defense", "cicids_spa
 AUTOENCODER_REL_PATH = os.path.join("Autoencoder", "cicids_autoencoder.keras")
 RF_MODEL_PATH = os.path.join("XGBoost and Random Forest","models_ensemble", "rf_model.joblib")
 XGB_MODEL_PATH = os.path.join("XGBoost and Random Forest","models_ensemble", "xgb_model.joblib")
+
+
+DB_HOST = os.getenv("DB_HOST")
+DB_PORT = os.getenv("DB_PORT")
+DB_NAME = os.getenv("DB_NAME")
+DB_USER = os.getenv("DB_USER")
+DB_PASSWORD = os.getenv("DB_PASSWORD")
 
 # Resolve absolute paths for them
 RF_MODEL_ABS_PATH = os.path.join(BASE_DIR, RF_MODEL_PATH) # Adjust based on where you put the folder

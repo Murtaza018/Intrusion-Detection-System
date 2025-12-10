@@ -9,6 +9,34 @@ import traceback
 import sys
 
 from config import API_KEY
+import numpy as np
+from sklearn.metrics.pairwise import cosine_similarity
+
+def calculate_group_consistency(feature_list):
+    """
+    Calculates how similar a group of feature vectors are.
+    Returns a score between 0.0 (Different) and 1.0 (Identical).
+    """
+    if not feature_list or len(feature_list) < 2:
+        return 1.0 # 1 packet is always consistent with itself
+    
+    # Convert to numpy array
+    matrix = np.array(feature_list)
+    
+    # Compute Cosine Similarity between all pairs
+    # Result is a N x N matrix where [i,j] is similarity between packet i and j
+    sim_matrix = cosine_similarity(matrix)
+    
+    # We want the average similarity of the upper triangle (excluding self-similarity diagonal)
+    # Get upper triangle indices
+    iu = np.triu_indices(len(sim_matrix), k=1)
+    
+    if len(iu[0]) == 0:
+        return 1.0
+        
+    avg_similarity = np.mean(sim_matrix[iu])
+    return float(avg_similarity)
+
 
 class APIServer:
     """Flask API server for Flutter"""
@@ -62,6 +90,100 @@ class APIServer:
                 sys.stdout.flush()
                 return jsonify({"error": f"An internal error occurred: {str(e)}"}), 500
         
+        @self.app.route("/api/analyze_selection", methods=['POST'])
+        @require_api_key
+        def analyze_selection():
+            data = request.json
+            gan_ids = [p['id'] for p in data.get('gan_queue', [])]
+            jitter_ids = [p['id'] for p in data.get('jitter_queue', [])]
+            
+            response = {
+                "gan_score": 0.0,
+                "jitter_score": 0.0,
+                "gan_status": "Insufficient Data",
+                "jitter_status": "Insufficient Data"
+            }
+
+            # Helper to filter valid features
+            def get_valid_features(ids):
+                raw_feats = self.packet_storage.get_features_for_training(ids)
+                # Only keep features that are not empty lists
+                return [f for f in raw_feats if f and len(f) > 0]
+
+            # --- ANALYZE GAN QUEUE ---
+            if gan_ids:
+                feats = get_valid_features(gan_ids)
+                if len(feats) > 1: # Need at least 2 to compare
+                    try:
+                        score = calculate_group_consistency(feats)
+                        response["gan_score"] = round(score, 4)
+                        
+                        if score > 0.90: response["gan_status"] = "Excellent (Homogeneous)"
+                        elif score > 0.80: response["gan_status"] = "Good"
+                        elif score > 0.60: response["gan_status"] = "Mixed (Caution)"
+                        else: response["gan_status"] = "Poor (Too Diverse)"
+                    except Exception as e:
+                        print(f"[!] Analysis Error (GAN): {e}")
+                        response["gan_status"] = "Error in Calculation"
+                elif len(feats) == 1:
+                    response["gan_score"] = 1.0
+                    response["gan_status"] = "Single Item (Perfect)"
+                else:
+                    response["gan_status"] = "No Features Found"
+
+            # --- ANALYZE JITTER QUEUE ---
+            if jitter_ids:
+                feats = get_valid_features(jitter_ids)
+                if len(feats) > 1:
+                    try:
+                        score = calculate_group_consistency(feats)
+                        response["jitter_score"] = round(score, 4)
+                        if score > 0.85: response["jitter_status"] = "Consistent"
+                        else: response["jitter_status"] = "Varied"
+                    except Exception as e:
+                        print(f"[!] Analysis Error (Jitter): {e}")
+                        response["jitter_status"] = "Error"
+                elif len(feats) == 1:
+                    response["jitter_score"] = 1.0
+                    response["jitter_status"] = "Single Item"
+                else:
+                    response["jitter_status"] = "No Features Found"
+
+            return jsonify(response)
+
+        @self.app.route("/api/labels", methods=['GET'])
+        @require_api_key
+        def get_labels():
+            try:
+                import joblib
+                import os
+                
+                # Robust Path Finding logic
+                possible_paths = [
+                    "ids_pipeline/label_encoder.pkl",
+                    "label_encoder.pkl",
+                    os.path.join(os.path.dirname(os.path.abspath(__file__)), "label_encoder.pkl")
+                ]
+                
+                target_path = None
+                for p in possible_paths:
+                    if os.path.exists(p):
+                        target_path = p
+                        break
+                
+                if target_path:
+                    print(f"[API] Loading labels from: {target_path}") # Debug print
+                    encoder = joblib.load(target_path)
+                    labels = list(encoder.classes_)
+                    return jsonify({"labels": labels})
+                else:
+                    print("[API] Error: label_encoder.pkl not found!")
+            except Exception as e:
+                print(f"[!] Error loading labels: {e}")
+            
+            return jsonify({"labels": ["BENIGN", "DDoS", "PortScan", "Bot"]})
+        
+        
         @self.app.route("/api/pipeline/stop", methods=['POST'])
         @require_api_key
         def stop_pipeline():
@@ -78,19 +200,67 @@ class APIServer:
                 "packets_processed": self.packet_storage.get_stats()["total_packets"]
             })
         
+
         @self.app.route("/api/packets/recent", methods=['GET'])
         @require_api_key
         def get_recent_packets():
-            limit = request.args.get('limit', default=10000, type=int)
-            packets = self.packet_storage.get_packets(limit=limit)
+            limit = request.args.get('limit', default=10, type=int)
+            offset = request.args.get('offset', default=0, type=int)
+            status = request.args.get('status', default=None, type=str) # NEW
+            
+            # Pass status to storage
+            packets = self.packet_storage.get_packets(limit=limit, offset=offset, status_filter=status)
             
             return jsonify({
                 "packets": packets,
                 "count": len(packets),
                 "limit": limit,
+                "offset": offset,
+                "filter": status,
                 "last_updated": datetime.now().isoformat()
             })
         
+        # Add this new route
+        @self.app.route("/api/retrain", methods=['POST'])
+        @require_api_key
+        def trigger_retrain():
+            data = request.json
+            if not data:
+                return jsonify({"error": "No data provided"}), 400
+            
+            gan_packets = data.get('gan_queue', [])
+            jitter_packets = data.get('jitter_queue', [])
+            
+            if not gan_packets and not jitter_packets:
+                return jsonify({"message": "No packets to retrain on."}), 200
+
+            # 1. Extract IDs
+            gan_ids = [p['id'] for p in gan_packets]
+            jitter_ids = [p['id'] for p in jitter_packets]
+            
+            print(f"[API] Received Retrain Request:")
+            print(f"   - GAN Queue: {len(gan_ids)} packets")
+            print(f"   - Jitter Queue: {len(jitter_ids)} packets")
+
+            # 2. Fetch Features from DB (Crucial Step!)
+            # We need the math (features), not just the text summary
+            gan_features = self.packet_storage.get_features_for_training(gan_ids)
+            jitter_features = self.packet_storage.get_features_for_training(jitter_ids)
+            
+            # 3. Trigger Training (Placeholder for now)
+            # This is where we will hook up your actual GAN/Jitter scripts later
+            # For now, we confirm we got the data.
+            success = True 
+            message = f"Queued {len(gan_features)} samples for GAN and {len(jitter_features)} for Jittering."
+
+            return jsonify({
+                "status": "success", 
+                "message": message,
+                "gan_count": len(gan_features),
+                "jitter_count": len(jitter_features)
+            })
+
+
         @self.app.route("/api/stats", methods=['GET'])
         @require_api_key
         def get_stats():

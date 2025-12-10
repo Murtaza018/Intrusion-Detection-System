@@ -1,18 +1,13 @@
 # detector.py
-# Detection logic and classification
+# Detection logic and classification (Complete Version)
 
 import numpy as np
 import threading
 import queue
 import traceback
 
-# --- FIX: Import Packet class ---
 from packet_storage import Packet
-# --------------------------------
-
-# --- FIX: Move this import to the top level ---
 from config import BACKGROUND_SUMMARY_SIZE
-# ----------------------------------------------
 
 class Detector:
     """Main detection logic"""
@@ -79,7 +74,7 @@ class Detector:
                 # Clean up old flows periodically
                 self.feature_extractor.cleanup_old_flows()
                 
-                # Extract features
+                # Extract features (Raw List of floats)
                 features, flow_key = self.feature_extractor.extract_features(packet)
                 
                 # Update min/max and get scaled features
@@ -97,49 +92,35 @@ class Detector:
                     rf_model = self.model_loader.get_rf_model()
                     xgb_model = self.model_loader.get_xgb_model()
                     autoencoder = self.model_loader.get_autoencoder_model()
-
+                    
+                    # 1. CNN Prediction (Binary)
                     cnn_prob = main_model.predict(scaled_features, verbose=0)[0][0]
-
-                    rf_all_probs = self.model_loader.get_rf_model().predict_proba(scaled_features)[0]
+                    
+                    # 2. RF Prediction (Multi-Class)
+                    # We assume class 0 is Normal, rest are Attack
+                    rf_all_probs = rf_model.predict_proba(scaled_features)[0]
                     rf_prob = 1.0 - rf_all_probs[0]
-
-                    xgb_all_probs = self.model_loader.get_xgb_model().predict_proba(scaled_features)[0]
+                    
+                    # 3. XGB Prediction (Multi-Class)
+                    xgb_all_probs = xgb_model.predict_proba(scaled_features)[0]
                     xgb_prob = 1.0 - xgb_all_probs[0]
-
-                    # ----- Ensemble configuration (tunable) -----
-                    W_CNN = 0.6    # weight for CNN
-                    W_RF  = 0.25   # weight for RF
-                    W_XGB = 0.15   # weight for XGBoost
-
-                    HIGH_CONF_OVERRIDE = 0.95  # if any model >= this, auto‑attack
-                    ENSEMBLE_THRESH    = 0.65  # main threshold for ensemble (tune later)
-                    # --------------------------------------------
-
-                    # High‑confidence override: any model very sure -> trust it
-                    high_conf = max(cnn_prob, rf_prob, xgb_prob)
-                    if high_conf >= HIGH_CONF_OVERRIDE:
-                        ensemble_prob = high_conf
-                        is_attack = True
-                    else:
-                        # Weighted soft voting
-                        ensemble_prob = (
-                            W_CNN * cnn_prob +
-                            W_RF  * rf_prob +
-                            W_XGB * xgb_prob
-                        )
-                        is_attack = ensemble_prob >= ENSEMBLE_THRESH
-
+                    
+                    # 4. Ensemble Voting (Max for Sensitivity)
+                    # Using MAX ensures if ANY model sees an attack, we flag it.
+                    ensemble_prob = max(cnn_prob, rf_prob, xgb_prob)
+                    
                     # Debug logging
-                    print(
+                    if ensemble_prob > 0.1 or packet_id % 50 == 0:
+                        print(
                             f"[VOTE] ID:{packet_id} | "
                             f"CNN:{cnn_prob:.2f} RF:{rf_prob:.2f} XGB:{xgb_prob:.2f} | "
-                            f"ENS:{ensemble_prob:.2f} (HC:{high_conf:.2f})"
+                            f"FINAL:{ensemble_prob:.2f}"
                         )
 
-                    if is_attack:
+                    if ensemble_prob > 0.40:
                         # Known attack
-                        print(f"\n[!!!] KNOWN ATTACK - ID:{packet_id} Confidence:{ensemble_prob:.4f}")
-                        self._handle_known_attack(packet, packet_id, scaled_features, ensemble_prob, packet_info)
+                        print(f"\n[!!!] ENSEMBLE ATTACK - ID:{packet_id} Score:{ensemble_prob:.4f}")
+                        self._handle_known_attack(packet, packet_id, scaled_features, ensemble_prob, packet_info, features)
                     else:
                         # Check for zero-day
                         reconstruction = autoencoder.predict(scaled_features, verbose=0)
@@ -151,15 +132,15 @@ class Detector:
                         if mse > threshold:
                             # Zero-day anomaly
                             print(f"\n[?!?] ZERO-DAY - ID:{packet_id} Error:{mse:.4f} > Thr:{threshold:.4f}")
-                            self._handle_zero_day(packet, packet_id, scaled_features, mse, packet_info)
+                            self._handle_zero_day(packet, packet_id, scaled_features, mse, packet_info, features)
                         else:
                             # Normal traffic
                             if self.packet_storage.get_stats()["total_packets"] % 20 == 0:
                                 print(".", end="", flush=True)
-                            self._handle_normal(packet, packet_id, packet_info)
+                            self._handle_normal(packet, packet_id, packet_info, features)
                 else:
                     # Still in warmup, just record as normal
-                    self._handle_normal(packet, packet_id, packet_info)
+                    self._handle_normal(packet, packet_id, packet_info, features)
                 
                 self.packet_queue.task_done()
                 
@@ -183,28 +164,20 @@ class Detector:
                 
                 print(f"[XAI] Processing ID:{task['packet_id']}")
                 
-                # Attempt to initialize SHAP if needed, using data from FeatureExtractor
+                # Attempt to initialize SHAP if needed
                 if not self.xai_explainer.initialized:
-                    # Get unscaled background samples from FeatureExtractor
                     bg_samples_unscaled = self.feature_extractor.get_background_samples()
                     
                     if len(bg_samples_unscaled) >= BACKGROUND_SUMMARY_SIZE:
-                        print(f"[XAI] Populating background data from FeatureExtractor with {len(bg_samples_unscaled)} samples for SHAP initialization.")
+                        print(f"[XAI] Populating background data...")
                         
-                        # Use a lock when modifying XAIExplainer's background_data
                         with self.xai_explainer.lock:
                             self.xai_explainer.background_data.clear()
                             for sample in bg_samples_unscaled:
-                                # sample is (n_features,) unscaled. Scale it.
                                 scaled_sample = self.feature_extractor.scale_features(sample)
-                                # scaled_sample is (1, n_features) scaled. Flatten and add.
                                 self.xai_explainer.background_data.append(scaled_sample.flatten())
                         
-                        # Now try to initialize SHAP
                         self.xai_explainer.initialize_shap(main_model.predict, num_samples=BACKGROUND_SUMMARY_SIZE)
-                    else:
-                        # Not enough samples yet, generate_explanation will use fallback
-                        print(f"[XAI] Not enough background samples in FeatureExtractor ({len(bg_samples_unscaled)}/{BACKGROUND_SUMMARY_SIZE}) for SHAP initialization yet. Using fallback explanation.")
 
                 # Generate explanation
                 explanation = self.xai_explainer.generate_explanation(
@@ -215,16 +188,19 @@ class Detector:
                     attack_type=task['attack_type']
                 )
                 
-                # Create packet for Flutter
+                # Update DB with explanation
+                # We don't need to pass 'features' here because they were already saved
+                # when the packet was first created in _handle_... methods
                 packet_obj = self._create_packet_object(
                     packet=task['packet'],
                     packet_id=task['packet_id'],
                     status=task['status'],
                     confidence=task['confidence'],
-                    explanation=explanation
+                    explanation=explanation,
+                    features=None 
                 )
                 
-                # Update in storage
+                # Update in storage (this will perform an SQL UPDATE)
                 self.packet_storage.add_packet(packet_obj)
                 
                 print(f"[XAI] ✅ Explanation generated for ID:{task['packet_id']}")
@@ -237,7 +213,7 @@ class Detector:
                 print(f"[!] XAI error: {e}")
                 traceback.print_exc()
     
-    def _handle_known_attack(self, packet, packet_id, features, confidence, packet_info):
+    def _handle_known_attack(self, packet, packet_id, features, confidence, packet_info, raw_features):
         """Handle known attack detection"""
         # Send initial alert
         initial_explanation = {
@@ -253,7 +229,8 @@ class Detector:
             packet_id=packet_id,
             status="known_attack",
             confidence=confidence,
-            explanation=initial_explanation
+            explanation=initial_explanation,
+            features=raw_features
         )
         
         self.packet_storage.add_packet(packet_obj)
@@ -274,7 +251,7 @@ class Detector:
             except queue.Full:
                 print(f"[!] XAI queue full for ID:{packet_id}")
     
-    def _handle_zero_day(self, packet, packet_id, features, error, packet_info):
+    def _handle_zero_day(self, packet, packet_id, features, error, packet_info, raw_features):
         """Handle zero-day anomaly detection"""
         # Send initial alert
         initial_explanation = {
@@ -290,7 +267,8 @@ class Detector:
             packet_id=packet_id,
             status="zero_day",
             confidence=error,
-            explanation=initial_explanation
+            explanation=initial_explanation,
+            features=raw_features
         )
         
         self.packet_storage.add_packet(packet_obj)
@@ -311,7 +289,7 @@ class Detector:
             except queue.Full:
                 print(f"[!] XAI queue full for ID:{packet_id}")
     
-    def _handle_normal(self, packet, packet_id, packet_info):
+    def _handle_normal(self, packet, packet_id, packet_info, raw_features):
         """Handle normal traffic"""
         explanation = {
             "type": "NORMAL_TRAFFIC",
@@ -326,7 +304,8 @@ class Detector:
             packet_id=packet_id,
             status="normal",
             confidence=0.0,
-            explanation=explanation
+            explanation=explanation,
+            features=raw_features
         )
         
         self.packet_storage.add_packet(packet_obj)
@@ -358,7 +337,7 @@ class Detector:
         
         return packet_info
     
-    def _create_packet_object(self, packet, packet_id, status, confidence, explanation):
+    def _create_packet_object(self, packet, packet_id, status, confidence, explanation, features=None):
         """Create Packet object for storage"""
         from datetime import datetime
         from scapy.all import IP, TCP, UDP
@@ -397,5 +376,6 @@ class Detector:
             timestamp=datetime.now(),
             status=status,
             confidence=confidence,
-            explanation=explanation
+            explanation=explanation,
+            features=features
         )

@@ -14,9 +14,10 @@ class Packet {
   final int dstPort;
   final int length;
   final DateTime timestamp;
-  final String status; // 'normal', 'known_attack', 'zero_day'
+  final String status;
   final double confidence;
   final Map<String, dynamic>? explanation;
+  String? userLabel; // Stores the label assigned by the user
 
   Packet({
     required this.id,
@@ -31,10 +32,10 @@ class Packet {
     required this.status,
     this.confidence = 0.0,
     this.explanation,
+    this.userLabel,
   });
 }
 
-// --- IDS Provider ---
 class IdsProvider with ChangeNotifier {
   bool _isRunning = false;
   List<Packet> _packets = [];
@@ -43,165 +44,223 @@ class IdsProvider with ChangeNotifier {
   int _attackCount = 0;
   int _zeroDayCount = 0;
   Timer? _packetTimer;
-  Set<int> _processedPacketIds =
-      {}; // ADDED: Track processed IDs to prevent duplicates
+  Set<int> _processedPacketIds = {};
 
-  // ADDED: Current filter status
-  String _currentFilter = 'all'; // 'all', 'normal', 'known_attack', 'zero_day'
+  String _currentFilter = 'all';
+  bool _isLoadingMore = false;
 
+  // --- ADAPTATION QUEUES ---
+  final Set<int> _selectedPacketIds = {};
+  final List<Packet> _ganQueue = [];
+  final List<Packet> _jitterQueue = [];
+
+  // --- BATCH LABELING & SAFETY STATE (NEW) ---
+  String? _batchLabel;
+  bool _isNewAttack = false;
+  bool _consistencyChecked = false;
+  bool _consistencyPassed = false;
+
+  // Getters
   bool get isRunning => _isRunning;
   List<Packet> get packets => _packets;
   int get totalPackets => _totalPackets;
   int get normalCount => _normalCount;
   int get attackCount => _attackCount;
   int get zeroDayCount => _zeroDayCount;
-  // ADDED: Getter for current filter
   String get currentFilter => _currentFilter;
+  bool get isLoadingMore => _isLoadingMore;
 
-  // ADDED: Getter for filtered packets
   List<Packet> get filteredPackets {
-    if (_currentFilter == 'all') {
-      return _packets;
+    if (_currentFilter == 'all') return _packets;
+    return _packets.where((packet) => packet.status == _currentFilter).toList();
+  }
+
+  // Queue Getters
+  List<Packet> get ganQueue => _ganQueue;
+  List<Packet> get jitterQueue => _jitterQueue;
+  int get totalSelected => _ganQueue.length + _jitterQueue.length;
+
+  // Label State Getters
+  String? get batchLabel => _batchLabel;
+  bool get isNewAttack => _isNewAttack;
+  bool get consistencyChecked => _consistencyChecked;
+  bool get consistencyPassed => _consistencyPassed;
+
+  // CHANGE IP HERE IF NEEDED (10.0.2.2 for Emulator)
+  static const String BASE_URL = "http://127.0.0.1:5001";
+
+  // --- SELECTION LOGIC ---
+  bool isSelected(int packetId) => _selectedPacketIds.contains(packetId);
+
+  void toggleSelection(Packet packet, String queueType) {
+    if (_selectedPacketIds.contains(packet.id)) {
+      // Deselect
+      _selectedPacketIds.remove(packet.id);
+      _ganQueue.removeWhere((p) => p.id == packet.id);
+      _jitterQueue.removeWhere((p) => p.id == packet.id);
     } else {
-      return _packets
-          .where((packet) => packet.status == _currentFilter)
-          .toList();
+      // Select
+      _selectedPacketIds.add(packet.id);
+      if (queueType == 'gan') {
+        _ganQueue.add(packet);
+      } else if (queueType == 'jitter') {
+        _jitterQueue.add(packet);
+      }
+    }
+    // Reset consistency checks when selection changes
+    _consistencyChecked = false;
+    _consistencyPassed = false;
+    notifyListeners();
+  }
+
+  void clearQueues() {
+    _selectedPacketIds.clear();
+    _ganQueue.clear();
+    _jitterQueue.clear();
+    _batchLabel = null;
+    _consistencyChecked = false;
+    notifyListeners();
+  }
+
+  // --- BATCH LABEL SETTERS (NEW) ---
+  void setBatchLabel(String? label, bool isNew) {
+    _batchLabel = label;
+    _isNewAttack = isNew;
+    // Require re-check if label strategies change
+    _consistencyChecked = false;
+    _consistencyPassed = false;
+    notifyListeners();
+  }
+
+  void setConsistencyStatus(bool checked, bool passed) {
+    _consistencyChecked = checked;
+    _consistencyPassed = passed;
+    notifyListeners();
+  }
+
+  void setFilter(String filter) {
+    if (_currentFilter != filter) {
+      _currentFilter = filter;
+      _packets = []; // Clear list to avoid mixing types
+      _processedPacketIds.clear();
+      notifyListeners();
+      _fetchRecentPackets(); // Fetch new data from backend
     }
   }
 
-  static const String BASE_URL = "http://127.0.0.1:5001";
-
   // --- Pipeline Control ---
   Future<void> startPipeline() async {
-    if (_isRunning) return; // ADDED: Prevent multiple starts
-
+    if (_isRunning) return;
     _isRunning = true;
     notifyListeners();
-
     try {
-      final response = await http.post(
-        Uri.parse('$BASE_URL/api/pipeline/start'),
-        headers: {'X-API-Key': 'MySuperSecretKey12345!'},
-      );
-
-      if (response.statusCode == 200) {
-        print("[FLUTTER] Pipeline started successfully");
-        _startRealPacketStream();
-      } else {
-        print("[FLUTTER] Failed to start pipeline: ${response.statusCode}");
-        _isRunning = false;
-        notifyListeners();
-      }
+      await http.post(Uri.parse('$BASE_URL/api/pipeline/start'),
+          headers: {'X-API-Key': 'MySuperSecretKey12345!'});
+      _startRealPacketStream();
     } catch (e) {
-      print('Error starting pipeline: $e');
       _isRunning = false;
       notifyListeners();
     }
   }
 
   Future<void> stopPipeline() async {
-    if (!_isRunning) return; // ADDED: Prevent multiple stops
-
+    if (!_isRunning) return;
     _isRunning = false;
     _packetTimer?.cancel();
-    _packetTimer = null;
     notifyListeners();
-
     try {
-      final response = await http.post(
-        Uri.parse('$BASE_URL/api/pipeline/stop'),
-        headers: {'X-API-Key': 'MySuperSecretKey12345!'},
-      );
-
-      if (response.statusCode == 200) {
-        print("[FLUTTER] Pipeline stopped successfully");
-      }
+      await http.post(Uri.parse('$BASE_URL/api/pipeline/stop'),
+          headers: {'X-API-Key': 'MySuperSecretKey12345!'});
     } catch (e) {
-      print('Error stopping pipeline: $e');
+      print('Error stopping: $e');
     }
   }
 
-  // --- Data Polling ---
   void _startRealPacketStream() {
     _packetTimer?.cancel();
-
-    // ADDED: Also fetch stats immediately when starting
+    _fetchRecentPackets();
     _fetchStatsFromBackend();
-
     _packetTimer = Timer.periodic(Duration(seconds: 2), (timer) async {
       if (!_isRunning) {
         timer.cancel();
         return;
       }
-
-      try {
-        // Fetch both packets and stats in parallel
-        await Future.wait([
-          _fetchRecentPackets(),
-          _fetchStatsFromBackend(),
-        ]);
-      } catch (e) {
-        print('Error in packet stream: $e');
-      }
+      await Future.wait([_fetchRecentPackets(), _fetchStatsFromBackend()]);
     });
   }
 
-  // ADDED: Separate method for fetching packets
   Future<void> _fetchRecentPackets() async {
     try {
-      final response = await http.get(
-        Uri.parse('$BASE_URL/api/packets/recent?limit=100'), // Increased limit
-        headers: {'X-API-Key': 'MySuperSecretKey12345!'},
-      );
-
+      String url = '$BASE_URL/api/packets/recent?limit=100';
+      if (_currentFilter != 'all') url += '&status=$_currentFilter';
+      final response = await http.get(Uri.parse(url),
+          headers: {'X-API-Key': 'MySuperSecretKey12345!'});
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
-        final List packets = data['packets'];
-
-        for (var packetData in packets) {
+        for (var packetData in data['packets']) {
           _addPacketFromApi(packetData);
         }
       }
     } catch (e) {
-      print('Error fetching packets: $e');
+      print('Error fetching: $e');
     }
   }
 
-  // ADDED: Separate method for fetching stats from backend
-  Future<void> _fetchStatsFromBackend() async {
-    try {
-      final response = await http.get(
-        Uri.parse('$BASE_URL/api/stats'),
-        headers: {'X-API-Key': 'MySuperSecretKey12345!'},
-      );
+  List<String> _existingLabels = [];
+  List<String> get existingLabels => _existingLabels;
 
+  Future<void> fetchLabels() async {
+    try {
+      final response = await http.get(Uri.parse('$BASE_URL/api/labels'),
+          headers: {'X-API-Key': 'MySuperSecretKey12345!'});
       if (response.statusCode == 200) {
-        final statsData = jsonDecode(response.body);
-        _updateStatsFromBackend(statsData);
+        final data = jsonDecode(response.body);
+        _existingLabels = List<String>.from(data['labels']);
+        notifyListeners();
       }
     } catch (e) {
-      print('Error fetching stats: $e');
-    }
-  }
-
-  // ADDED: Update stats from backend to stay in sync
-  void _updateStatsFromBackend(Map<String, dynamic> statsData) {
-    // Only update if backend has more recent data
-    if (statsData['total_packets'] > _totalPackets) {
-      _totalPackets = statsData['total_packets'] ?? _totalPackets;
-      _normalCount = statsData['normal_count'] ?? _normalCount;
-      _attackCount = statsData['attack_count'] ?? _attackCount;
-      _zeroDayCount = statsData['zero_day_count'] ?? _zeroDayCount;
+      print("Error fetching labels: $e");
+      _existingLabels = [
+        "BENIGN",
+        "DDoS",
+        "PortScan",
+        "Bot",
+        "Infiltration",
+        "Web Attack"
+      ];
       notifyListeners();
     }
   }
 
   void _addPacketFromApi(Map<String, dynamic> data) {
     final int packetId = data['id'];
+    final newPacket = _mapDataToPacket(data);
 
-    // Create the new packet object from the API data
-    final newPacket = Packet(
-      id: packetId,
+    if (_processedPacketIds.contains(packetId)) {
+      final index = _packets.indexWhere((p) => p.id == packetId);
+      if (index != -1) {
+        if (jsonEncode(_packets[index].explanation) !=
+            jsonEncode(newPacket.explanation)) {
+          _packets[index] = newPacket;
+          notifyListeners();
+        }
+      }
+      return;
+    }
+    _packets.insert(0, newPacket);
+    _processedPacketIds.add(packetId);
+
+    if (_packets.length > 5000) {
+      _packets = _packets.sublist(0, 4000);
+      final recentIds = _packets.map((p) => p.id).toSet();
+      _processedPacketIds = _processedPacketIds.intersection(recentIds);
+    }
+    notifyListeners();
+  }
+
+  Packet _mapDataToPacket(Map<String, dynamic> data) {
+    return Packet(
+      id: data['id'],
       summary: data['summary'],
       srcIp: data['src_ip'],
       dstIp: data['dst_ip'],
@@ -214,115 +273,162 @@ class IdsProvider with ChangeNotifier {
       confidence: (data['confidence'] ?? 0.0).toDouble(),
       explanation: data['explanation'],
     );
+  }
 
-    // Check if we already have this packet
-    if (_processedPacketIds.contains(packetId)) {
-      // Find the index of the existing packet
-      final index = _packets.indexWhere((p) => p.id == packetId);
-      if (index != -1) {
-        // Check if the explanation has changed. If so, update the packet.
-        // We use jsonEncode to compare the maps conveniently.
-        if (jsonEncode(_packets[index].explanation) !=
-            jsonEncode(newPacket.explanation)) {
-          print("[FLUTTER] Updating explanation for packet #$packetId");
-          _packets[index] = newPacket;
-          notifyListeners(); // Trigger UI rebuild
+  Future<void> _fetchStatsFromBackend() async {
+    try {
+      final response = await http.get(Uri.parse('$BASE_URL/api/stats'),
+          headers: {'X-API-Key': 'MySuperSecretKey12345!'});
+      if (response.statusCode == 200) {
+        final statsData = jsonDecode(response.body);
+        if (statsData['total_packets'] > _totalPackets) {
+          _totalPackets = statsData['total_packets'] ?? _totalPackets;
+          _normalCount = statsData['normal_count'] ?? _normalCount;
+          _attackCount = statsData['attack_count'] ?? _attackCount;
+          _zeroDayCount = statsData['zero_day_count'] ?? _zeroDayCount;
+          notifyListeners();
         }
       }
-      return; // Exit after updating or if no update was needed
+    } catch (e) {
+      print('Error stats: $e');
     }
-
-    // If it's a new packet, add it to the list
-    _packets.insert(0, newPacket);
-    _processedPacketIds.add(packetId);
-
-    // Update local stats for immediate feedback
-    _totalPackets++;
-    if (newPacket.status == 'normal') {
-      _normalCount++;
-    } else if (newPacket.status == 'known_attack') {
-      _attackCount++;
-    } else if (newPacket.status == 'zero_day') {
-      _zeroDayCount++;
-    }
-
-    // Memory management: Limit list size
-    if (_packets.length > 200) {
-      _packets = _packets.sublist(0, 100);
-      final recentIds = _packets.map((p) => p.id).toSet();
-      _processedPacketIds = _processedPacketIds.intersection(recentIds);
-    }
-
-    notifyListeners();
   }
 
-  // For demo - add a zero-day anomaly
-  void addZeroDayPacket() {
-    final packet = Packet(
-      id: _totalPackets + 1,
-      summary: 'UDP 192.168.1.99:12345 → 10.0.0.1:53',
-      srcIp: '192.168.1.99',
-      dstIp: '10.0.0.1',
-      protocol: 'UDP',
-      srcPort: 12345,
-      dstPort: 53,
-      length: 512,
-      timestamp: DateTime.now(),
-      status: 'zero_day',
-      confidence: 0.92,
-      explanation: {
-        'type': 'Zero-Day Anomaly',
-        'error': 2.45,
-        'threshold': 1.0,
-      },
-    );
+  // --- SEND RETRAIN REQUEST (UPDATED) ---
+  Future<bool> sendRetrainRequest() async {
+    // Only block if GAN packets exist but no label is set
+    if (_ganQueue.isNotEmpty && _batchLabel == null) return false;
 
-    _packets.insert(0, packet);
-    _totalPackets++;
-    _zeroDayCount++;
-    _processedPacketIds.add(packet.id);
-    notifyListeners();
-  }
-
-  // Clear all packets
-  void clearPackets() {
-    _packets.clear();
-    _processedPacketIds.clear();
-    _totalPackets = 0;
-    _normalCount = 0;
-    _attackCount = 0;
-    _zeroDayCount = 0;
-    notifyListeners();
-  }
-
-  // ADDED: Get pipeline status from backend
-  Future<Map<String, dynamic>?> getPipelineStatus() async {
     try {
-      final response = await http.get(
-        Uri.parse('$BASE_URL/api/pipeline/status'),
-        headers: {'X-API-Key': 'MySuperSecretKey12345!'},
+      final body = {
+        "gan_queue": _ganQueue
+            .map((p) => {"id": p.id, "status": p.status, "summary": p.summary})
+            .toList(),
+        "jitter_queue": _jitterQueue
+            .map((p) => {"id": p.id, "status": p.status, "summary": p.summary})
+            .toList(),
+
+        // Pass the Label Info
+        "target_label": _batchLabel,
+        "is_new_label": _isNewAttack
+      };
+
+      print("[FLUTTER] Sending Retrain Request...");
+
+      final response = await http.post(
+        Uri.parse('$BASE_URL/api/retrain'),
+        headers: {
+          'Content-Type': 'application/json',
+          'X-API-Key': 'MySuperSecretKey12345!'
+        },
+        body: jsonEncode(body),
+      );
+
+      if (response.statusCode == 200) {
+        final respData = jsonDecode(response.body);
+        print("[FLUTTER] Success: ${respData['message']}");
+        return true;
+      } else {
+        print("[FLUTTER] Failed: ${response.statusCode} - ${response.body}");
+        return false;
+      }
+    } catch (e) {
+      print("[FLUTTER] Error sending retrain request: $e");
+      return false;
+    }
+  }
+
+  Future<Map<String, dynamic>> analyzeQueues() async {
+    try {
+      final body = {
+        "gan_queue": _ganQueue.map((p) => {"id": p.id}).toList(),
+        "jitter_queue": _jitterQueue.map((p) => {"id": p.id}).toList(),
+      };
+
+      final response = await http.post(
+        Uri.parse('$BASE_URL/api/analyze_selection'),
+        headers: {
+          'Content-Type': 'application/json',
+          'X-API-Key': 'MySuperSecretKey12345!'
+        },
+        body: jsonEncode(body),
       );
 
       if (response.statusCode == 200) {
         return jsonDecode(response.body);
       }
     } catch (e) {
-      print('Error fetching pipeline status: $e');
+      print("Analysis error: $e");
     }
-    return null;
+    return {};
   }
 
-  // ADDED: Method to set the filter
-  void setFilter(String filter) {
-    if (_currentFilter != filter) {
-      _currentFilter = filter;
+  // Load More (History)
+  Future<void> loadMorePackets() async {
+    if (_isLoadingMore) return;
+    _isLoadingMore = true;
+    notifyListeners();
+    try {
+      int currentCount = _packets.length;
+      String url = '$BASE_URL/api/packets/recent?limit=50&offset=$currentCount';
+      if (_currentFilter != 'all') url += '&status=$_currentFilter';
+      final response = await http.get(Uri.parse(url),
+          headers: {'X-API-Key': 'MySuperSecretKey12345!'});
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        for (var packetData in data['packets']) {
+          final int packetId = packetData['id'];
+          if (!_processedPacketIds.contains(packetId)) {
+            _packets.add(_mapDataToPacket(packetData));
+            _processedPacketIds.add(packetId);
+          }
+        }
+      }
+    } catch (e) {
+      print('Error loading more: $e');
+    } finally {
+      _isLoadingMore = false;
       notifyListeners();
     }
   }
 
-  @override
-  void dispose() {
-    _packetTimer?.cancel();
-    super.dispose();
+  void addZeroDayPacket() {
+    final packet = Packet(
+        id: DateTime.now().millisecondsSinceEpoch,
+        summary: 'UDP 192.168.1.99:12345 → 10.0.0.1:53',
+        srcIp: '192.168.1.99',
+        dstIp: '10.0.0.1',
+        protocol: 'UDP',
+        srcPort: 12345,
+        dstPort: 53,
+        length: 512,
+        timestamp: DateTime.now(),
+        status: 'zero_day',
+        confidence: 0.92,
+        explanation: {
+          'type': 'Zero-Day Anomaly',
+          'error': 2.45,
+          'threshold': 1.0
+        });
+    _packets.insert(0, packet);
+    _processedPacketIds.add(packet.id);
+    notifyListeners();
+  }
+
+  // Method to mark a packet as false positive (sends request to backend)
+  Future<bool> markAsFalsePositive(int packetId) async {
+    try {
+      final response = await http.post(
+        Uri.parse('$BASE_URL/api/feedback/false_positive'),
+        headers: {
+          'Content-Type': 'application/json',
+          'X-API-Key': 'MySuperSecretKey12345!'
+        },
+        body: jsonEncode({'packet_id': packetId}),
+      );
+      return response.statusCode == 200;
+    } catch (e) {
+      return false;
+    }
   }
 }

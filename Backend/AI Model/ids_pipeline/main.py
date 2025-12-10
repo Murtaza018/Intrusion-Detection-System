@@ -1,5 +1,5 @@
 # main.py
-# Main entry point for the IDS pipeline
+# Main entry point for the IDS pipeline with GAN Retraining support
 
 import sys
 import os
@@ -26,31 +26,31 @@ def main():
     print("="*60)
     print(f"📁 Base Directory: {BASE_DIR}")
     
-    # Initialize components
+    # 1. Initialize Core Components
     model_loader = ModelLoader()
     feature_extractor = FeatureExtractor()
     xai_explainer = XAIExplainer()
     packet_storage = PacketStorage(max_size=100000)
     
-    # Create detector
+    # 2. Create Detector
     detector = Detector(model_loader, feature_extractor, xai_explainer, packet_storage)
     
-    # Create pipeline manager
-    # Pass NETWORK_INTERFACE here
+    # 3. Create Pipeline Manager
     pipeline_manager = PipelineManager(
         model_loader=model_loader,
         feature_extractor=feature_extractor,
         xai_explainer=xai_explainer,
         packet_storage=packet_storage,
         detector=detector,
-        api_server=None,  # Will be set after creation
-        interface=NETWORK_INTERFACE # <--- NEW
+        api_server=None,  # Will be set next
+        interface=NETWORK_INTERFACE
     )
     
-    # Create API server
-    api_server = APIServer(packet_storage, pipeline_manager)
+    # 4. Create API Server (CORRECTED LINE)
+    # Passing all 4 dependencies required for GAN and Jitter retraining
+    api_server = APIServer(packet_storage, feature_extractor, pipeline_manager, model_loader)
     
-    # Update pipeline manager with API server
+    # 5. Link API Server back to Pipeline Manager
     pipeline_manager.api_server = api_server
     
     # Signal handler for graceful shutdown
@@ -68,11 +68,11 @@ def main():
     print("  ✅ Packet Storage")
     print("  ✅ Detector")
     print("  ✅ Pipeline Manager")
-    print("  ✅ API Server")
+    print("  ✅ API Server (GAN Ready)")
     print("\n⚠️  IMPORTANT: Pipeline will start when Flutter app sends start command")
     print("="*60)
     
-    # Start Flask server explicitly
+    # Start Flask server explicitly in a daemon thread
     flask_thread = threading.Thread(
         target=api_server.run,
         args=(FLASK_HOST, FLASK_PORT),
@@ -80,10 +80,6 @@ def main():
         name="Flask_Server"
     )
     flask_thread.start()
-    
-    # --- REMOVED start_sniffing() CALL ---
-    # It is now called inside pipeline_manager.start()
-    # -------------------------------------
     
     # Keep main thread alive
     try:

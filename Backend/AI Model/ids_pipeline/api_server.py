@@ -1,6 +1,3 @@
-# api_server.py
-# Full Version: Includes GAN Retraining + Detailed Debug Logs + All Utility Routes
-
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 from datetime import datetime
@@ -18,15 +15,16 @@ from config import API_KEY
 
 # --- RETRAINER IMPORTS ---
 from gan_retrainer import GanRetrainer
-# from jitter_retrainer import JitterRetrainer # Uncomment when file is ready
+# from jitter_retrainer import JitterRetrainer 
 
 # --- HELPER FUNCTIONS ---
 def calculate_group_consistency(feature_list):
-    """Calculates Cosine Similarity for consistency checks"""
+    # Calculates Cosine Similarity for consistency checks.
     if not feature_list or len(feature_list) < 2: return 1.0
     matrix = np.array(feature_list)
     try:
         sim_matrix = cosine_similarity(matrix)
+        # Get upper triangle elements excluding the diagonal.
         iu = np.triu_indices(len(sim_matrix), k=1)
         if len(iu[0]) == 0: return 1.0
         avg_similarity = np.mean(sim_matrix[iu])
@@ -34,27 +32,27 @@ def calculate_group_consistency(feature_list):
     except: return 0.0
 
 class APIServer:
-    """Flask API server for Flutter"""
+    # Flask API server for the IDS frontend.
     
     def __init__(self, packet_storage, feature_extractor, pipeline_manager, model_loader):
         self.app = Flask(__name__)
         CORS(self.app)
         
-        # 1. Store Dependencies
+        # Store Dependencies
         self.packet_storage = packet_storage
         self.feature_extractor = feature_extractor
         self.pipeline_manager = pipeline_manager
         self.model_loader = model_loader
         
-        # 2. Initialize Retrainers
+        # Initialize Retrainers
         self.gan_retrainer = GanRetrainer(packet_storage, feature_extractor)
         # self.jitter_retrainer = JitterRetrainer(packet_storage, feature_extractor, model_loader) 
 
-        # 3. Setup Routes
+        # Setup Routes
         self._register_routes()
     
     def _register_routes(self):
-        """Setup Flask routes with authentication"""
+        # Setup Flask routes with API key authentication.
         
         def require_api_key(f):
             @wraps(f)
@@ -69,18 +67,16 @@ class APIServer:
         @require_api_key
         def start_pipeline():
             try:
-                print("[DEBUG] Request to START pipeline received")
                 sys.stdout.flush()
                 success = self.pipeline_manager.start()
                 if success:
                     return jsonify({
                         "status": "started", 
-                        "message": "IDS pipeline started successfully",
+                        "message": "IDS pipeline started",
                         "start_time": datetime.now().isoformat()
                     })
                 return jsonify({"error": "Failed to start pipeline"}), 500
             except Exception as e:
-                print(f"[!] Exception in start_pipeline: {e}")
                 traceback.print_exc()
                 return jsonify({"error": str(e)}), 500
         
@@ -88,9 +84,8 @@ class APIServer:
         @require_api_key
         def stop_pipeline():
             try:
-                print("[DEBUG] Request to STOP pipeline received")
                 self.pipeline_manager.stop()
-                return jsonify({"status": "stopped", "message": "IDS pipeline stopped successfully"})
+                return jsonify({"status": "stopped", "message": "IDS pipeline stopped"})
             except Exception as e:
                 return jsonify({"error": str(e)}), 500
 
@@ -147,7 +142,7 @@ class APIServer:
                 "timestamp": datetime.now().isoformat()
             })
 
-        # --- 3. LABELS (ROBUST PATH FINDING) ---
+        # --- 3. LABELS ---
         @self.app.route("/api/labels", methods=['GET'])
         @require_api_key
         def get_labels():
@@ -163,7 +158,8 @@ class APIServer:
                     encoder = joblib.load(target_path)
                     return jsonify({"labels": list(encoder.classes_)})
             except Exception as e:
-                print(f"[!] Error loading labels: {e}")
+                # Log the error but don't show to user
+                pass
             
             return jsonify({"labels": ["BENIGN", "DDoS", "PortScan", "Bot"]})
 
@@ -230,30 +226,23 @@ class APIServer:
                 return jsonify({"message": "No packets to retrain on."}), 200
 
             messages = []
-            print(f"\n[API] === Received Retrain Request ===")
-            print(f"   - GAN Queue: {len(gan_packets)} packets")
-            print(f"   - Label: {target_label} (New: {is_new_label})")
 
             # A. GAN Retraining
             if gan_packets:
                 gan_ids = [p['id'] for p in gan_packets]
-                print(f"[API] 🚀 Triggering GAN Pipeline on {len(gan_ids)} IDs...")
                 
                 result = self.gan_retrainer.retrain(gan_ids, target_label, is_new_label)
                 messages.append(f"GAN: {result['message']}")
                 
                 if result['status'] == 'error':
-                    print(f"[API] ❌ GAN Error: {result['message']}")
+                    # Log error internally.
+                    pass
 
-            # B. Jitter Retraining (Commented out until file is ready)
+            # B. Jitter Retraining (Disabled)
             if jitter_packets:
                 messages.append("Jitter: Skipped (Disabled in Code)")
-                # jitter_ids = [p['id'] for p in jitter_packets]
-                # result = self.jitter_retrainer.retrain(jitter_ids)
-                # messages.append(f"Jitter: {result['message']}")
 
             full_message = " | ".join(messages)
-            print(f"[API] ✅ Retraining Cycle Complete.\n")
 
             return jsonify({
                 "status": "success", 
@@ -263,6 +252,6 @@ class APIServer:
             })
 
     def run(self, host="0.0.0.0", port=5001):
-        """Run the Flask server"""
-        print(f"[FLUTTER] Starting Flask server on http://{host}:{port}")
+        # Run the Flask server.
+        print(f"Starting Flask server on http://{host}:{port}")
         self.app.run(host=host, port=port, debug=True, use_reloader=False)

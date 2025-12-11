@@ -1,5 +1,3 @@
-# sweep_ensemble_threshold.py
-# Sweep ENSEMBLE_THRESH for your CNN+RF+XGB ensemble on X_val/y_val.
 
 import os
 import sys

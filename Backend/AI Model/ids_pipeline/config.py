@@ -1,5 +1,3 @@
-# config.py
-# Configuration settings for the IDS pipeline
 
 import os
 from dotenv import load_dotenv

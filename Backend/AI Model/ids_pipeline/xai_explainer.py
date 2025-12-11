@@ -1,5 +1,3 @@
-# xai_explainer.py
-# Complete XAI implementation with SHAP
 
 import sys
 import os

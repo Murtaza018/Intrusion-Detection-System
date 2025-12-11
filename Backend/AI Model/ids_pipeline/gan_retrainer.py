@@ -1,5 +1,3 @@
-# gan_retrainer.py
-# Fixed: BatchNormalization syntax error (momentum=0.8)
 
 import numpy as np
 import tensorflow as tf
@@ -11,20 +9,31 @@ import joblib
 import pandas as pd
 
 class GanRetrainer:
-    def __init__(self, packet_storage, feature_extractor, model_path="Models/cgan_generator.keras"):
+    def __init__(self, packet_storage, feature_extractor, model_path="cgan_generator.keras"):
         self.packet_storage = packet_storage
         self.feature_extractor = feature_extractor
-        self.model_path = model_path
         
         # --- ROBUST PATH SETUP (FIXED) ---
-        # Get the directory where THIS script (gan_retrainer.py) is located
+        # 1. Get current directory (ids_pipeline)
         current_dir = os.path.dirname(os.path.abspath(__file__))
         
-        # Now define paths relative to this script, not the terminal command
+        # 2. Get Parent Directory (Backend/AI Model)
+        parent_dir = os.path.dirname(current_dir)
+        
+        # 3. Define Model Path (Backend/AI Model/Models/cgan_generator.keras)
+        models_dir = os.path.join(parent_dir, "Models")
+        self.model_path = os.path.join(models_dir, "cgan_generator.keras")
+        
+        # 4. Ensure Models directory exists
+        if not os.path.exists(models_dir):
+            print(f"[*] Creating Models directory at: {models_dir}")
+            os.makedirs(models_dir, exist_ok=True)
+
+        # 5. Define other paths (Relative to script)
         self.replay_path = os.path.join(current_dir, "replay_buffer.npz")
         self.encoder_path = os.path.join(current_dir, "label_encoder.pkl")
         
-        print(f"[DEBUG] GAN Retrainer looking for files in: {current_dir}")
+        print(f"[DEBUG] Model Path: {self.model_path}")
         
         self.latent_dim = 128
         self.data_dim = 78
@@ -34,12 +43,11 @@ class GanRetrainer:
         try:
             self.generator = keras.models.load_model(self.model_path, compile=False)
             print(f"[+] Loaded GAN Generator.")
-            # Auto-detect class count from input shape
             self.num_classes = self.generator.input[1].shape[1]
         except:
-            print(f"[!] Warning: Could not load GAN. Using default.")
+            print(f"[!] Warning: Could not load GAN from {self.model_path}. Using default.")
             self.generator = self._build_generator(self.num_classes)
-
+        
         # Load Replay Buffer
         self.replay_data, self.replay_labels = None, None
         if os.path.exists(self.replay_path):
@@ -51,29 +59,29 @@ class GanRetrainer:
             except: pass
         else:
             print(f"[!] WARNING: Replay buffer not found at {self.replay_path}")
+
     def retrain(self, packet_ids, target_label, is_new_label, epochs=50):
         print(f"\n[*] --- STARTING GAN PIPELINE ---")
         print(f"[*] Target Label: '{target_label}' (New: {is_new_label})")
         
-        # 1. BACKUP CURRENT MODEL (Safety Net)
+        # 1. BACKUP
         backup_path = self.model_path + ".bak"
         if os.path.exists(self.model_path):
             import shutil
             shutil.copy(self.model_path, backup_path)
             print(f"[*] Backup created at {backup_path}")
 
-        # 2. HANDLE LABELS (Encoder Update)
+        # 2. LABELS
         class_index = self._handle_label_encoder(target_label, is_new_label)
         if class_index == -1: return {"status": "error", "message": "Label Encoder Error"}
 
-        # 3. MODEL SURGERY (Only if New Label is actually adding a class)
+        # 3. SURGERY
         if is_new_label:
             if class_index >= self.num_classes:
                 print(f"[*] Performing Architecture Surgery: {self.num_classes} -> {class_index + 1} classes...")
                 self.generator = self._expand_model_classes(self.generator)
                 self.num_classes += 1
         
-        # Rebuild training parts to match new size
         self.critic = self._build_critic(self.num_classes)
         self.wgan = self._build_wgan_gp()
 
@@ -81,7 +89,6 @@ class GanRetrainer:
         raw_feats = self.packet_storage.get_features_for_training(packet_ids)
         if not raw_feats: return {"status": "error", "message": "No features found in DB."}
         
-        # Scale inputs to [0,1]
         scaled_feats = [self.feature_extractor.scale_features(np.array(f)).flatten() for f in raw_feats]
         
         training_data = []
@@ -91,25 +98,20 @@ class GanRetrainer:
         print(f"[*] Augmenting {len(scaled_feats)} packets to {TARGET_TOTAL} synthetic samples...")
         
         while len(training_data) < TARGET_TOTAL:
-            # 60% Bias towards the input packets
             if np.random.rand() < 0.6 or self.replay_data is None:
                 base = scaled_feats[np.random.randint(0, len(scaled_feats))]
                 label_idx = class_index
                 noise = np.random.normal(0, 0.02, base.shape)
                 sample = np.clip(base + noise, 0.0, 1.0)
             else:
-                # 40% Replay
                 idx = np.random.randint(0, len(self.replay_data))
                 raw_sample = self.replay_data[idx]
                 sample = self.feature_extractor.scale_features(raw_sample).flatten()
                 label_idx = int(self.replay_labels[idx])
             
             training_data.append(sample)
-            
-            # One-hot encoding
             one_hot = np.zeros(self.num_classes)
-            if label_idx < self.num_classes:
-                one_hot[label_idx] = 1.0
+            if label_idx < self.num_classes: one_hot[label_idx] = 1.0
             training_labels.append(one_hot)
 
         X_train = np.array(training_data, dtype='float32')
@@ -122,30 +124,23 @@ class GanRetrainer:
         try:
             self.wgan.fit(dataset, epochs=epochs, verbose=0)
             
-            # --- POST-TRAINING SAFETY CHECK ---
             print("[*] Verifying model stability before saving...")
             if self._check_model_health(class_index):
-                # SUCCESS
                 self.generator.save(self.model_path)
                 
-                # 6. GENERATE & SAVE
                 gen_count = 5000
                 print(f"[*] Generating {gen_count} fresh packets for class '{target_label}'...")
                 self._generate_and_save_packets(class_index, target_label, count=gen_count)
-                
-                # 7. UPDATE BUFFER
                 self._update_replay_buffer(class_index)
                 
                 return {"status": "success", "message": f"Trained on '{target_label}' & Verified."}
             else:
-                # FAILURE
-                print("[!] CRITICAL: Mode Collapse detected. Reverting to backup.")
+                print("[!] CRITICAL: Mode Collapse detected. Reverting.")
                 if os.path.exists(backup_path):
                     import shutil
                     shutil.copy(backup_path, self.model_path)
                     self.generator = keras.models.load_model(self.model_path, compile=False)
-                
-                return {"status": "error", "message": "Training failed (Mode Collapse). Reverted to previous model."}
+                return {"status": "error", "message": "Training failed (Mode Collapse). Reverted."}
 
         except Exception as e:
             traceback.print_exc()
@@ -163,17 +158,13 @@ class GanRetrainer:
             current_classes = list(encoder.classes_)
             if is_new:
                 if label in current_classes:
-                    print(f"[*] Label '{label}' already exists. Switching to Update Mode.")
                     return list(encoder.transform([label]))[0]
-                print(f"[*] Registering NEW label: '{label}'")
                 new_classes = current_classes + [label]
                 encoder.classes_ = np.array(new_classes)
                 joblib.dump(encoder, self.encoder_path)
                 return len(new_classes) - 1
             else:
-                if label not in current_classes:
-                    print(f"[!] Error: Label '{label}' not found in encoder.")
-                    return -1
+                if label not in current_classes: return -1
                 return list(encoder.transform([label]))[0]
         except Exception as e:
             print(f"[!] Encoder Error: {e}"); return -1
@@ -218,20 +209,11 @@ class GanRetrainer:
             labels[:, class_idx] = 1.0
             preds = self.generator.predict([noise, labels], verbose=0)
             diversity = np.std(preds)
-            print(f"    > Diversity Score: {diversity:.5f}")
-            if diversity < 0.01:
-                print("    [!] FAILED: Low diversity.")
-                return False
-            if np.min(preds) < 0.0 or np.max(preds) > 1.0:
-                print("    [!] FAILED: Output out of bounds.")
-                return False
-            print("    [+] Model health looks good.")
+            if diversity < 0.01 or np.min(preds) < 0.0 or np.max(preds) > 1.0: return False
             return True
-        except Exception as e:
-            print(f"    [!] Health check crashed: {e}")
-            return False
+        except: return False
 
-    # --- ARCHITECTURE (FIXED BATCHNORM) ---
+    # --- ARCHITECTURE ---
     def _expand_model_classes(self, old_model):
         old_input_label = old_model.input[1]
         new_num_classes = old_input_label.shape[1] + 1
@@ -239,23 +221,13 @@ class GanRetrainer:
         input_noise = layers.Input(shape=(self.latent_dim,), name="noise_input")
         x = layers.concatenate([input_noise, new_input_label])
         
-        # FIX: Explicitly name momentum argument
-        x = layers.Dense(256)(x)
-        x = layers.BatchNormalization(momentum=0.8)(x) # <--- FIXED
-        x = layers.LeakyReLU(0.2)(x)
-        
-        x = layers.Dense(512)(x)
-        x = layers.BatchNormalization(momentum=0.8)(x) # <--- FIXED
-        x = layers.LeakyReLU(0.2)(x)
-        
-        x = layers.Dense(1024)(x)
-        x = layers.BatchNormalization(momentum=0.8)(x) # <--- FIXED
-        x = layers.LeakyReLU(0.2)(x)
+        x = layers.Dense(256)(x); x = layers.BatchNormalization(momentum=0.8)(x); x = layers.LeakyReLU(0.2)(x)
+        x = layers.Dense(512)(x); x = layers.BatchNormalization(0.8)(x); x = layers.LeakyReLU(0.2)(x)
+        x = layers.Dense(1024)(x); x = layers.BatchNormalization(0.8)(x); x = layers.LeakyReLU(0.2)(x)
         
         output = layers.Dense(self.data_dim, activation='sigmoid')(x)
         new_model = keras.Model([input_noise, new_input_label], output, name="generator_expanded")
         
-        # Weight Copy Logic
         old_dense_1 = [l for l in old_model.layers if isinstance(l, layers.Dense)][0]
         new_dense_1 = [l for l in new_model.layers if isinstance(l, layers.Dense)][0]
         old_w, old_b = old_dense_1.get_weights()
@@ -282,24 +254,14 @@ class GanRetrainer:
         noise = layers.Input(shape=(self.latent_dim,))
         label = layers.Input(shape=(n_classes,))
         x = layers.concatenate([noise, label])
-        
-        # FIX: Explicitly name momentum argument
-        x = layers.Dense(256)(x)
-        x = layers.BatchNormalization(momentum=0.8)(x) # <--- FIXED
-        x = layers.LeakyReLU(0.2)(x)
-        
-        x = layers.Dense(512)(x)
-        x = layers.BatchNormalization(momentum=0.8)(x) # <--- FIXED
-        x = layers.LeakyReLU(0.2)(x)
-        
-        x = layers.Dense(1024)(x)
-        x = layers.BatchNormalization(momentum=0.8)(x) # <--- FIXED
-        x = layers.LeakyReLU(0.2)(x)
-        
+        x = layers.Dense(256)(x); x = layers.BatchNormalization(momentum=0.8)(x); x = layers.LeakyReLU(0.2)(x)
+        x = layers.Dense(512)(x); x = layers.BatchNormalization(momentum=0.8)(x); x = layers.LeakyReLU(0.2)(x)
+        x = layers.Dense(1024)(x); x = layers.BatchNormalization(momentum=0.8)(x); x = layers.LeakyReLU(0.2)(x)
         output = layers.Dense(self.data_dim, activation='sigmoid')(x)
         return keras.Model([noise, label], output, name="generator")
 
     def _build_wgan_gp(self):
+        # --- FIXED: Added custom compile() method ---
         class WGAN_GP_Model(keras.Model):
             def __init__(self, critic, generator, latent_dim, d_steps=5, gp_weight=10.0):
                 super(WGAN_GP_Model, self).__init__()
@@ -308,6 +270,13 @@ class GanRetrainer:
                 self.latent_dim = latent_dim
                 self.d_steps = d_steps
                 self.gp_weight = gp_weight
+
+            # CRITICAL FIX: Override compile to accept custom args
+            def compile(self, d_optimizer, g_optimizer, **kwargs):
+                super(WGAN_GP_Model, self).compile(**kwargs)
+                self.d_optimizer = d_optimizer
+                self.g_optimizer = g_optimizer
+
             def gradient_penalty(self, batch_size, real, fake, labels):
                 alpha = tf.random.normal([batch_size, 1], 0.0, 1.0)
                 diff = fake - real
@@ -318,6 +287,7 @@ class GanRetrainer:
                 grads = gp_tape.gradient(pred, [interpolated])[0]
                 norm = tf.sqrt(tf.reduce_sum(tf.square(grads), axis=[1]))
                 return tf.reduce_mean((norm - 1.0) ** 2)
+
             def train_step(self, data):
                 real_images, labels = data
                 batch_size = tf.shape(real_images)[0]
@@ -332,6 +302,7 @@ class GanRetrainer:
                         d_loss = d_cost + gp * self.gp_weight
                     d_grad = tape.gradient(d_loss, self.critic.trainable_variables)
                     self.d_optimizer.apply_gradients(zip(d_grad, self.critic.trainable_variables))
+                
                 noise = tf.random.normal([batch_size, self.latent_dim])
                 with tf.GradientTape() as tape:
                     fake_images = self.generator([noise, labels], training=True)
@@ -340,6 +311,7 @@ class GanRetrainer:
                 g_grad = tape.gradient(g_loss, self.generator.trainable_variables)
                 self.g_optimizer.apply_gradients(zip(g_grad, self.generator.trainable_variables))
                 return {"d_loss": d_loss, "g_loss": g_loss}
+
         model = WGAN_GP_Model(self.critic, self.generator, self.latent_dim)
         model.compile(d_optimizer=keras.optimizers.Adam(0.0002, 0.0, 0.9), g_optimizer=keras.optimizers.Adam(0.0002, 0.0, 0.9))
         return model

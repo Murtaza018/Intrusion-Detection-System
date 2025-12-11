@@ -1,5 +1,4 @@
-# packet_storage.py
-# Persistent PostgreSQL storage (Now with Features!)
+
 
 import psycopg2
 import threading

@@ -1,5 +1,3 @@
-# check_cnn_calibration.py
-# Evaluate how well the CNN's probabilities match reality on X_val/y_val.
 
 import os
 import sys

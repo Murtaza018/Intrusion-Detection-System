@@ -1,6 +1,3 @@
-# detector.py
-# Detection logic and classification (Complete Version)
-
 import numpy as np
 import threading
 import queue

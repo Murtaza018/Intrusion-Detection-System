@@ -15,7 +15,6 @@ print(f"[+] Loaded {len(packets)} packets. Preparing to blast...")
 clean_packets = []
 for pkt in packets:
     if IP in pkt:
-        # Strip Layer 2 (Ethernet) to let OS handle it
         ip_pkt = pkt[IP]
         ip_pkt.dst = TARGET_IP
         

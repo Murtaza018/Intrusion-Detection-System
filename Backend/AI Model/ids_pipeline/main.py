@@ -1,5 +1,3 @@
-# main.py
-# Main entry point for the IDS pipeline with GAN Retraining support
 
 import sys
 import os

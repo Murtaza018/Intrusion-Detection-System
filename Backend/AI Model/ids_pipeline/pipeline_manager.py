@@ -1,5 +1,3 @@
-# pipeline_manager.py
-# Pipeline coordination and management
 
 import threading
 from scapy.all import sniff

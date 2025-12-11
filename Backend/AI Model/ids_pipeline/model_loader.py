@@ -1,6 +1,3 @@
-# model_loader.py
-# Load and manage Keras models
-
 import warnings
 import numpy as np
 import tensorflow as tf

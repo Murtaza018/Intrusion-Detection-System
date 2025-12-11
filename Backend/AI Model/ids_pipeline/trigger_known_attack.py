@@ -4,7 +4,7 @@ import random
 
 TARGET_IP = "8.8.8.8" 
 TARGET_PORT = 80 
-PACKET_COUNT = 5000  # Sending A LOT to trigger flow volume features
+PACKET_COUNT = 5000  
 SRC_PORT = random.randint(1024, 65535)
 
 print(f"[*] Launching TURBO DoS (Port {SRC_PORT} -> {TARGET_IP})...")

@@ -1,8 +1,7 @@
 from scapy.all import *
 import time
 
-# 1. Settings
-pcap_file = "2021-10-01-TR-Qakbot-infection-wtih-spambot-acitvity.pcap" # Your PCAP file
+pcap_file = "2021-10-01-TR-Qakbot-infection-wtih-spambot-acitvity.pcap" 
 # Make sure it looks exactly like this line:
 target_interface = r"\Device\NPF_{98FACC85-B69E-4177-BBBF-0F143020C5D2}"
 
@@ -17,7 +16,5 @@ for pkt in packets:
         pkt[Ether].dst = "ff:ff:ff:ff:ff:ff"
     # Send packet at layer 2
     sendp(pkt, iface=target_interface, verbose=0)
-    # Optional: tiny sleep to not completely overwhelm the CPU
-    # time.sleep(0.001)
-
+ 
 print("[*] Replay finished.")

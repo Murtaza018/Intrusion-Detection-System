@@ -1,5 +1,3 @@
-# feature_extractor.py
-# Feature extraction from network packets
 
 import time
 import numpy as np
@@ -131,7 +129,27 @@ class FeatureExtractor:
         
         scaled = np.clip((features_np - self.live_min) / denom_safe, 0.0, 1.0)
         return scaled.reshape(1, -1)
-    
+
+    # --- NEW METHOD FOR GAN SUPPORT ---
+    def inverse_scale_features(self, scaled_features):
+        """
+        Convert scaled [0,1] features back to raw values using live_min/live_max.
+        Crucial for generating CSVs from GAN output.
+        """
+        # If we haven't learned scaling parameters yet, return as is
+        if not self.scaling_enabled or self.live_min is None or self.live_max is None:
+            return scaled_features
+
+        features_np = np.array(scaled_features, dtype=np.float32)
+        
+        # Formula: Raw = Scaled * (Max - Min) + Min
+        denom = (self.live_max - self.live_min)
+        
+        # We don't need denom_safe here because multiplication by 0 is fine (result is just min)
+        raw = features_np * denom + self.live_min
+        
+        return raw
+
     def add_reconstruction_error(self, error):
         """Add reconstruction error for dynamic threshold"""
         self.recent_errors.append(error)

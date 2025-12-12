@@ -1,184 +1,216 @@
+# train_wgan_gp_colab.py
+# Robust WGAN-GP Implementation for Tabular Data
+# FIXED: train_step data unpacking
+
 import os
 import shutil
 import numpy as np
 import tensorflow as tf
 from tensorflow import keras
 from tensorflow.keras import layers
-import gc
+from google.colab import drive
 
-# Enable GPU memory growth.
-gpus = tf.config.experimental.list_physical_devices('GPU')
-if gpus:
-    try:
-        for gpu in gpus:
-            tf.config.experimental.set_memory_growth(gpu, True)
-        print(f"GPU Detected: {len(gpus)} device(s). Memory growth enabled.")
-    except RuntimeError as e:
-        print(e)
+print("--- 🚀 Initializing WGAN-GP Training ---")
 
-print("Initializing High-Performance CGAN Training.")
+# --- 1. MOUNT GOOGLE DRIVE ---
+if not os.path.exists('/content/drive'):
+    drive.mount('/content/drive')
 
-# --- 1. CONFIGURATION ---
-DATA_PATH = "../Preprocessing/CGAN/CGAN_preprocessed_data/" 
-SAVE_PATH = "./Models/"
+# --- 2. CONFIGURATION ---
+DRIVE_SOURCE_PATH = "/content/drive/My Drive/IDS_Project/"
+SAVE_PATH = "/content/drive/My Drive/IDS_Project/Models/"
+LOCAL_DATA_PATH = "/content/data_cache/"
 
 # Hyperparameters
-LATENT_DIM = 128      
-DATA_DIM = 78         
-NUM_CLASSES = 15      
-EPOCHS = 100          
-BATCH_SIZE = 64       
-LEARNING_RATE = 0.0002 
-BETA_1 = 0.5          
+LATENT_DIM = 128
+DATA_DIM = 78
+NUM_CLASSES = 15
+EPOCHS = 100
+BATCH_SIZE = 64
+LEARNING_RATE = 0.0002
+CRITIC_EXTRA_STEPS = 5
+GP_WEIGHT = 10.0
 
-# Subset Configuration
+# Subset for speed/stability
 USE_SUBSET = True
-SUBSET_SIZE = 200000
+SUBSET_SIZE = 100000
 
-# Ensure save directory exists.
 os.makedirs(SAVE_PATH, exist_ok=True)
+os.makedirs(LOCAL_DATA_PATH, exist_ok=True)
 
-# --- 2. LOAD AND SUBSET DATA ---
-print(f"Loading dataset from {DATA_PATH}...")
-try:
-    X_train_full = np.load(os.path.join(DATA_PATH, 'X_full.npy'))
-    y_train_full = np.load(os.path.join(DATA_PATH, 'y_full.npy'))
-    print(f"Full Dataset loaded: {len(X_train_full):,} samples.")
-except FileNotFoundError:
-    print(f"CRITICAL ERROR: Could not find .npy files in {DATA_PATH}")
-    print("Please check your path.")
-    exit()
+# --- 3. DATA TRANSFER ---
+x_src = os.path.join(DRIVE_SOURCE_PATH, 'X_full.npy')
+y_src = os.path.join(DRIVE_SOURCE_PATH, 'y_full.npy')
+x_dst = os.path.join(LOCAL_DATA_PATH, 'X_full.npy')
+y_dst = os.path.join(LOCAL_DATA_PATH, 'y_full.npy')
+
+if not os.path.exists(x_dst):
+    try:
+        shutil.copy(x_src, x_dst)
+        shutil.copy(y_src, y_dst)
+    except FileNotFoundError:
+        print(f"[!] Critical Error: Files not found at {DRIVE_SOURCE_PATH}")
+        raise
+
+# --- 4. LOAD DATA ---
+print(f"[*] Loading data...")
+X_train_full = np.load(x_dst)
+y_train_full = np.load(y_dst)
 
 if USE_SUBSET and len(X_train_full) > SUBSET_SIZE:
-    print(f"Subsetting data to {SUBSET_SIZE:,} random samples...")
-    
-    # Create random indices.
+    print(f"[*] Subsetting to {SUBSET_SIZE} samples...")
     indices = np.random.permutation(len(X_train_full))[:SUBSET_SIZE]
-    
-    # Select subset.
     X_train = X_train_full[indices]
     y_train = y_train_full[indices]
-    
-    # Free up memory.
-    del X_train_full
-    del y_train_full
-    gc.collect()
-    
-    print(f"Subset ready: {len(X_train):,} samples.")
+    del X_train_full, y_train_full
+    import gc; gc.collect()
 else:
     X_train = X_train_full
     y_train = y_train_full
 
-# One-Hot Encode Labels.
-y_train_one_hot = tf.keras.utils.to_categorical(y_train, num_classes=NUM_CLASSES)
+# --- CRITICAL FIX: Cast to float32 ---
+X_train = X_train.astype('float32')
+y_train_one_hot = tf.keras.utils.to_categorical(y_train, num_classes=NUM_CLASSES).astype('float32')
+# -------------------------------------
 
-# --- 3. BUILD GENERATOR ---
+# --- 5. BUILD MODELS ---
+
+def build_critic():
+    img = layers.Input(shape=(DATA_DIM,))
+    label = layers.Input(shape=(NUM_CLASSES,))
+    x = layers.concatenate([img, label])
+
+    x = layers.Dense(512)(x)
+    x = layers.LeakyReLU(alpha=0.2)(x)
+    x = layers.Dropout(0.3)(x)
+
+    x = layers.Dense(256)(x)
+    x = layers.LeakyReLU(alpha=0.2)(x)
+    x = layers.Dropout(0.3)(x)
+
+    x = layers.Dense(128)(x)
+    x = layers.LeakyReLU(alpha=0.2)(x)
+
+    output = layers.Dense(1)(x)
+
+    return keras.Model([img, label], output, name="critic")
+
 def build_generator():
-    noise = layers.Input(shape=(LATENT_DIM,), name="noise_input")
-    label = layers.Input(shape=(NUM_CLASSES,), name="label_input")
+    noise = layers.Input(shape=(LATENT_DIM,))
+    label = layers.Input(shape=(NUM_CLASSES,))
     x = layers.concatenate([noise, label])
-    
+
     x = layers.Dense(256)(x)
     x = layers.BatchNormalization(momentum=0.8)(x)
     x = layers.LeakyReLU(alpha=0.2)(x)
-    
+
     x = layers.Dense(512)(x)
     x = layers.BatchNormalization(momentum=0.8)(x)
     x = layers.LeakyReLU(alpha=0.2)(x)
-    
+
     x = layers.Dense(1024)(x)
     x = layers.BatchNormalization(momentum=0.8)(x)
     x = layers.LeakyReLU(alpha=0.2)(x)
-    
-    output = layers.Dense(DATA_DIM, activation='sigmoid')(x) 
-    
-    model = keras.Model([noise, label], output, name="generator")
-    return model
 
+    output = layers.Dense(DATA_DIM, activation='sigmoid')(x)
+    return keras.Model([noise, label], output, name="generator")
+
+critic = build_critic()
 generator = build_generator()
 
-# --- 4. BUILD DISCRIMINATOR ---
-def build_discriminator():
-    img = layers.Input(shape=(DATA_DIM,), name="data_input")
-    label = layers.Input(shape=(NUM_CLASSES,), name="label_input")
-    x = layers.concatenate([img, label])
-    
-    x = layers.Dense(512)(x)
-    x = layers.LeakyReLU(alpha=0.2)(x)
-    x = layers.Dropout(0.2)(x) 
-    
-    x = layers.Dense(256)(x)
-    x = layers.LeakyReLU(alpha=0.2)(x)
-    x = layers.Dropout(0.2)(x)
-    
-    x = layers.Dense(128)(x)
-    x = layers.LeakyReLU(alpha=0.2)(x)
-    
-    output = layers.Dense(1, activation='sigmoid')(x)
-    
-    model = keras.Model([img, label], output, name="discriminator")
-    
-    # Use a slower Learning Rate for Discriminator.
-    opt = keras.optimizers.Adam(learning_rate=0.00002, beta_1=BETA_1)
-    model.compile(loss='binary_crossentropy', optimizer=opt, metrics=['accuracy'])
-    return model
+# --- 6. WGAN-GP MODEL CLASS ---
+class WGAN_GP(keras.Model):
+    def __init__(self, critic, generator, latent_dim, critic_extra_steps=5, gp_weight=10.0):
+        super(WGAN_GP, self).__init__()
+        self.critic = critic
+        self.generator = generator
+        self.latent_dim = latent_dim
+        self.d_steps = critic_extra_steps
+        self.gp_weight = gp_weight
 
-discriminator = build_discriminator()
+    def compile(self, d_optimizer, g_optimizer, d_loss_fn, g_loss_fn):
+        super(WGAN_GP, self).compile()
+        self.d_optimizer = d_optimizer
+        self.g_optimizer = g_optimizer
+        self.d_loss_fn = d_loss_fn
+        self.g_loss_fn = g_loss_fn
 
-# --- 5. BUILD COMBINED MODEL ---
-discriminator.trainable = False
-noise = layers.Input(shape=(LATENT_DIM,))
-label = layers.Input(shape=(NUM_CLASSES,))
-img = generator([noise, label])
-valid = discriminator([img, label])
+    def gradient_penalty(self, batch_size, real_images, fake_images, labels):
+        # Interpolate between real and fake
+        alpha = tf.random.normal([batch_size, 1], 0.0, 1.0)
+        diff = fake_images - real_images
+        interpolated = real_images + alpha * diff
 
-cgan = keras.Model([noise, label], valid)
-opt_gan = keras.optimizers.Adam(learning_rate=LEARNING_RATE, beta_1=BETA_1)
-cgan.compile(loss='binary_crossentropy', optimizer=opt_gan)
+        with tf.GradientTape() as gp_tape:
+            gp_tape.watch(interpolated)
+            # 1. Get the critic output for this interpolated image
+            pred = self.critic([interpolated, labels], training=True)
 
-# --- 6. TRAINING LOOP ---
-print("\n" + "="*50)
-print("STARTING TRAINING LOOP")
-print(f"Batch Size: {BATCH_SIZE}")
-print(f"Batches per Epoch: {len(X_train) // BATCH_SIZE}")
-print("="*50)
+        # 2. Calculate the gradients w.r.t to this interpolated image
+        grads = gp_tape.gradient(pred, [interpolated])[0]
+        # 3. Calculate the norm of the gradients
+        norm = tf.sqrt(tf.reduce_sum(tf.square(grads), axis=[1]))
+        # 4. Penalty: distance from 1.0
+        gp = tf.reduce_mean((norm - 1.0) ** 2)
+        return gp
 
-# Use one-sided label smoothing for stability (0.95 for real).
-real_labels = np.ones((BATCH_SIZE, 1)) * 0.95 
-fake_labels = np.zeros((BATCH_SIZE, 1))
-num_batches = X_train.shape[0] // BATCH_SIZE
+    def train_step(self, data):
+        # FIX: Correct unpacking of data tuple (X, y)
+        real_images, labels = data
+        batch_size = tf.shape(real_images)[0]
 
-for epoch in range(EPOCHS):
-    print(f"Epoch {epoch+1}/{EPOCHS}")
-    for i in range(num_batches):
-        # Train Discriminator
-        idx = np.random.randint(0, X_train.shape[0], BATCH_SIZE)
-        imgs, labels = X_train[idx], y_train_one_hot[idx]
-        
-        noise = np.random.normal(0, 1, (BATCH_SIZE, LATENT_DIM))
-        # Sample labels for the fake data to generate.
-        sampled_labels = tf.keras.utils.to_categorical(np.random.randint(0, NUM_CLASSES, BATCH_SIZE), num_classes=NUM_CLASSES)
-        
-        gen_imgs = generator.predict([noise, sampled_labels], verbose=0)
-        
-        d_loss_real = discriminator.train_on_batch([imgs, labels], real_labels)
-        d_loss_fake = discriminator.train_on_batch([gen_imgs, sampled_labels], fake_labels)
-        d_loss = 0.5 * np.add(d_loss_real, d_loss_fake)
-        
-        # Train Generator
-        noise = np.random.normal(0, 1, (BATCH_SIZE, LATENT_DIM))
-        valid_y = np.ones((BATCH_SIZE, 1)) 
-        g_loss = cgan.train_on_batch([noise, sampled_labels], valid_y)
-        
-        if i % 100 == 0:
-            print(f"Batch {i}/{num_batches} [D loss: {d_loss[0]:.4f}] [G loss: {g_loss:.4f}]")
+        # --- Train Critic ---
+        for i in range(self.d_steps):
+            noise = tf.random.normal([batch_size, self.latent_dim])
 
-    # Save Checkpoint
-    save_loc = os.path.join(SAVE_PATH, f"cgan_generator_epoch_{epoch+1}.keras")
-    generator.save(save_loc)
-    print(f"Saved checkpoint: {save_loc}")
+            with tf.GradientTape() as tape:
+                fake_images = self.generator([noise, labels], training=True)
+                fake_logits = self.critic([fake_images, labels], training=True)
+                real_logits = self.critic([real_images, labels], training=True)
 
-print("\n" + "="*50)
-print("TRAINING COMPLETE!")
-generator.save(os.path.join(SAVE_PATH, "cgan_generator_final.keras"))
-print("="*50)
+                d_cost = tf.reduce_mean(fake_logits) - tf.reduce_mean(real_logits)
+                gp = self.gradient_penalty(batch_size, real_images, fake_images, labels)
+                d_loss = d_cost + gp * self.gp_weight
+
+            d_gradient = tape.gradient(d_loss, self.critic.trainable_variables)
+            self.d_optimizer.apply_gradients(zip(d_gradient, self.critic.trainable_variables))
+
+        # --- Train Generator ---
+        noise = tf.random.normal([batch_size, self.latent_dim])
+        with tf.GradientTape() as tape:
+            fake_images = self.generator([noise, labels], training=True)
+            gen_img_logits = self.critic([fake_images, labels], training=True)
+            g_loss = -tf.reduce_mean(gen_img_logits)
+
+        g_gradient = tape.gradient(g_loss, self.generator.trainable_variables)
+        self.g_optimizer.apply_gradients(zip(g_gradient, self.generator.trainable_variables))
+
+        return {"d_loss": d_loss, "g_loss": g_loss}
+
+# --- 7. COMPILE & TRAIN ---
+wgan = WGAN_GP(critic=critic, generator=generator, latent_dim=LATENT_DIM)
+
+wgan.compile(
+    d_optimizer=keras.optimizers.Adam(learning_rate=LEARNING_RATE, beta_1=0.0, beta_2=0.9),
+    g_optimizer=keras.optimizers.Adam(learning_rate=LEARNING_RATE, beta_1=0.0, beta_2=0.9),
+    d_loss_fn=None,
+    g_loss_fn=None
+)
+
+print("\n--- Starting WGAN-GP Training ---")
+
+class SaveCallback(keras.callbacks.Callback):
+    def on_epoch_end(self, epoch, logs=None):
+        save_loc = os.path.join(SAVE_PATH, f"cgan_generator_epoch_{epoch+1}.keras")
+        self.model.generator.save(save_loc)
+        print(f"\n[+] Saved checkpoint: {save_loc}")
+
+# Pass data as a tuple (X, y) directly, not nested
+dataset = tf.data.Dataset.from_tensor_slices((X_train, y_train_one_hot))
+dataset = dataset.shuffle(buffer_size=1024).batch(BATCH_SIZE).prefetch(tf.data.AUTOTUNE)
+
+wgan.fit(dataset, epochs=EPOCHS, callbacks=[SaveCallback()])
+
+print("\n🎉 WGAN-GP Training Complete!")
+final_save_loc = os.path.join(SAVE_PATH, "cgan_generator_final.keras")
+generator.save(final_save_loc)

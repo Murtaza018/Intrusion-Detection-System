@@ -1,0 +1,5 @@
+
+Summary of the New Flow
+Packet In -> Build Graph -> Extract GNN Context.
+Ensemble (CNN+RF+XGB + Context) -> Is it a known attack?Yes: -> XAI -> Alert.No/Maybe: -> Send to MAE.
+MAE -> Can I reconstruct this "Normal" packet?No (High Error): -> Zero-Day Alert -> XAI.Yes (Low Error): -> Traffic Allowed.

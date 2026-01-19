@@ -56,3 +56,5 @@ MIN_SAMPLES_FOR_THRESHOLD = 50
 # XAI Configuration
 XAI_DIR = os.path.join(BASE_DIR, "XAI")  # XAI folder location
 USE_PROPER_XAI = True  # Set to False to use fallback
+
+GRAPH_WINDOW_SIZE = 1000

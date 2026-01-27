@@ -33,3 +33,5 @@ dist/
 
 *.pcap
 *.pcapng
+
+Backend/AI Model/GNN/training_data

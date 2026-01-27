@@ -3,3 +3,51 @@ Summary of the New Flow
 Packet In -> Build Graph -> Extract GNN Context.
 Ensemble (CNN+RF+XGB + Context) -> Is it a known attack?Yes: -> XAI -> Alert.No/Maybe: -> Send to MAE.
 MAE -> Can I reconstruct this "Normal" packet?No (High Error): -> Zero-Day Alert -> XAI.Yes (Low Error): -> Traffic Allowed.
+
+
+Phase 1: Data Preparation & Graph Construction
+The most significant change is moving from flat tables to graph-based data.
+
+Modify Feature Extractor: Update feature_extractor.py to maintain a sliding window of recent network flows.
+
+Build Adjacency Matrix: Create a script to map IP addresses as nodes and network flows as edges, including attributes like port and protocol.
+
+Generate Training Dataset: Process your existing PCAP files to create a synchronized dataset that contains both raw packet features and the graph structure of the network at that specific moment.
+
+Phase 2: Training the GNN (The Context Engine)
+Before the ensemble can be retrained, we need the model that provides the context.
+
+Model Selection: Implement a Graph Convolutional Network (GCN) or Graph Sage model.
+
+Embedding Extraction: Train the GNN to produce a "Node Embedding"—a vector (e.g., 16 or 32 dimensions) that represents an IP's behavior in relation to its neighbors.
+
+Validation: Ensure the GNN can differentiate between "Normal" neighborhood behavior and "Scanning/Lateral" behavior.
+
+Phase 3: Ensemble Retraining (The Core Logic)
+Now, we teach your primary models (CNN, XGB, RF) how to use this new context.
+
+Feature Fusion: Concatenate the original features with the GNN embeddings.
+
+CNN Training: Retrain the CNN to detect spatial patterns in the enriched feature set.
+
+Tree Model Training: Retrain XGBoost and Random Forest on the enriched data to find new statistical boundaries.
+
+Weighted Voting Update: Recalibrate the voting weights (using your 0.6 / 0.25 / 0.15 split) to account for the increased accuracy provided by the GNN.
+
+Phase 4: Implementing the Masked Autoencoder (The Novelty Gate)
+We replace the standard AE with the "SAFE" framework logic.
+
+Masking Logic: Develop a function that randomly masks 50% to 75% of input features during training.
+
+MAE Training: Train a deep autoencoder to reconstruct these masked values using only "Normal" traffic as the ground truth.
+
+Dynamic Thresholding: Use your "Find Threshold" script logic to set the Mean Squared Error (MSE) cutoff for what constitutes a "Zero-Day" anomaly.
+
+Phase 5: Backend Integration & XAI Update
+Finally, we put the pieces back into your Detector class.
+
+Update _detection_worker: Integrate the Graph Builder and GNN inference at the start of the loop.
+
+Update _xai_worker: Modify the SHAP explainer to handle the new GNN features so the user can see if "Network Context" was a major reason for the alert.
+
+Flutter UI Sync: Ensure the frontend can display the new "Novelty" scores and Graph context descriptions.

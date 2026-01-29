@@ -8,6 +8,7 @@ from tqdm import tqdm
 
 # --- CONFIGURATION ---
 EMBEDDING_DIM = 16
+NUM_FEATURES = 36 
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 SNAPSHOT_PATH = "./training_data/gnn_snapshots/"
 
@@ -19,79 +20,76 @@ class ContextSAGE(torch.nn.Module):
 
     def forward(self, x, edge_index):
         x = self.conv1(x, edge_index).relu()
+        x = F.dropout(x, p=0.2, training=self.training)
         return self.conv2(x, edge_index)
 
-def validate_embeddings(model, sample_file):
-    """Checks if the 16D vectors are diverse and meaningful"""
+def validate_embeddings(model, files):
+    """Statistically verifies that the 16D space is meaningful"""
     model.eval()
+    print("\n" + "="*40)
+    print("PILOT VALIDATION REPORT")
+    print("="*40)
+    
+    variances = []
     with torch.no_grad():
-        with open(os.path.join(SNAPSHOT_PATH, sample_file), 'rb') as f:
-            data = pickle.load(f)
-        
-        edge_index = torch.tensor(data['edge_index'], dtype=torch.long).to(DEVICE)
-        # Dummy node features (will be replaced by real mean features in main loop)
-        x = torch.ones((data['node_count'], 36)).to(DEVICE)
-        
-        z = model(x, edge_index)
-        
-        # Calculation: How different are the vectors?
-        variance = torch.var(z, dim=0).mean().item()
-        mag = torch.norm(z, dim=1).mean().item()
-        
-        print(f"\n" + "="*40)
-        print(f"VALIDATION AFTER EPOCH 1")
-        print("="*40)
-        print(f"Context Vector Dim:  {z.shape[1]}")
-        print(f"Unique IPs Checked:  {z.shape[0]}")
-        print(f"Average Magnitude:   {mag:.4f}")
-        print(f"Embedding Variance:  {variance:.6f}")
-        
-        if variance < 1e-5:
-            print("[!] ALERT: Model Collapse detected (Vectors are too similar).")
-        else:
-            print("[+] SUCCESS: Vectors are diverse. Logic is healthy.")
-        print("="*40 + "\n")
+        # Check a random selection of 5 snapshots
+        for f_name in np.random.choice(files, 5):
+            with open(os.path.join(SNAPSHOT_PATH, f_name), 'rb') as f:
+                data = pickle.load(f)
+            
+            edge_index = torch.tensor(data['edge_index'], dtype=torch.long).to(DEVICE)
+            edge_attr = torch.tensor(data['edge_attr'], dtype=torch.float).to(DEVICE)
+            
+            # Align features
+            x = torch.zeros((data['node_count'], NUM_FEATURES)).to(DEVICE)
+            x.index_add_(0, edge_index[0], edge_attr[:, :NUM_FEATURES])
+            
+            z = model(x, edge_index)
+            var = torch.var(z, dim=0).mean().item()
+            variances.append(var)
+
+    avg_var = np.mean(variances)
+    print(f"Avg Embedding Variance: {avg_var:.8f}")
+    if avg_var > 0.0001:
+        print("[+] STATUS: SUCCESS. The Context Engine is learning.")
+    else:
+        print("[!] STATUS: FAILURE. Model collapse. Try increasing Learning Rate.")
+    print("="*40 + "\n")
 
 def train_pilot():
     files = [f for f in os.listdir(SNAPSHOT_PATH) if f.endswith('.pkl')]
-    model = ContextSAGE(in_channels=36, embedding_dim=EMBEDDING_DIM).to(DEVICE)
+    model = ContextSAGE(in_channels=NUM_FEATURES, embedding_dim=EMBEDDING_DIM).to(DEVICE)
     optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
     
-    print(f"[*] Starting Epoch 1 (Pilot Run) on {DEVICE}...")
+    print(f"[*] Starting Pilot Run (1 Epoch) on {DEVICE}...")
 
     model.train()
-    total_loss = 0
-    
-    # tqdm gives us a nice progress bar
-    for filename in tqdm(files, desc="Training"):
-        with open(os.path.join(SNAPSHOT_PATH, filename), 'rb') as f:
-            data_dict = pickle.load(f)
-        
-        edge_index = torch.tensor(data_dict['edge_index'], dtype=torch.long).to(DEVICE)
-        num_nodes = data_dict['node_count']
-        
-        # Real logic: Node features = Average of their connection features
-        x = torch.zeros((num_nodes, 36)).to(DEVICE)
-        edge_attr = torch.tensor(data_dict['edge_attr'], dtype=torch.float).to(DEVICE)
-        x.index_add_(0, edge_index[0], edge_attr) # Aggregate features to nodes
-        
-        optimizer.zero_grad()
-        z = model(x, edge_index)
-        
-        # Unsupervised Loss: Connected nodes should have similar 16D vectors
-        # Formula: -log(sigmoid(dot_product(u, v)))
-        pos_scores = (z[edge_index[0]] * z[edge_index[1]]).sum(dim=1)
-        loss = -torch.log(torch.sigmoid(pos_scores) + 1e-15).mean()
-        
-        loss.backward()
-        optimizer.step()
-        total_loss += loss.item()
+    for filename in tqdm(files, desc="Training Snapshots"):
+        try:
+            with open(os.path.join(SNAPSHOT_PATH, filename), 'rb') as f:
+                data_dict = pickle.load(f)
+            
+            edge_index = torch.tensor(data_dict['edge_index'], dtype=torch.long).to(DEVICE)
+            edge_attr = torch.tensor(data_dict['edge_attr'], dtype=torch.float).to(DEVICE)
+            
+            # Create Node Identity (x) from sliced Edge Attributes
+            x = torch.zeros((data_dict['node_count'], NUM_FEATURES)).to(DEVICE)
+            x.index_add_(0, edge_index[0], edge_attr[:, :NUM_FEATURES])
+            
+            optimizer.zero_grad()
+            z = model(x, edge_index)
+            
+            # Unsupervised Link Prediction (Similarity Learning)
+            pos_scores = (z[edge_index[0]] * z[edge_index[1]]).sum(dim=1)
+            loss = -torch.log(torch.sigmoid(pos_scores) + 1e-15).mean()
+            
+            loss.backward()
+            optimizer.step()
+        except:
+            continue
 
-    # Save the model
     torch.save(model.state_dict(), "gnn_context_engine_pilot.pth")
-    
-    # Run Validation
-    validate_embeddings(model, files[0])
+    validate_embeddings(model, files)
 
 if __name__ == "__main__":
     train_pilot()

@@ -2,34 +2,24 @@ import time
 import numpy as np
 from collections import defaultdict, deque
 from scapy.all import IP, TCP, UDP
-
-# NEW: Import the GraphBuilder we discussed
 from graph_builder import GraphBuilder
 from config import NUM_FEATURES, FLOW_TIMEOUT, GRAPH_WINDOW_SIZE
 
 class FeatureExtractor:
-    """Extract features and maintain global network graph state"""
-    
     def __init__(self):
         self.flows = defaultdict(lambda: {"packets": [], "timestamps": [], "lengths": [], "flags": []})
         self.flow_timeout = FLOW_TIMEOUT
-        
-        # Phase 1: Graph Logic
         self.graph_builder = GraphBuilder(window_size=GRAPH_WINDOW_SIZE)
         self.node_stats = defaultdict(lambda: {"conn_count": 0, "unique_dst": set()})
         
-        # Existing scaling/error logic
+        # Scaling logic
         self.live_min = None
         self.live_max = None
         self.warmup_count = 0
         self.scaling_enabled = False
-        self.background_buffer = deque(maxlen=100)
-        self.recent_errors = deque(maxlen=200)
 
     def extract_features(self, packet):
-        """Extract features and update graph context"""
         features = [0.0] * NUM_FEATURES
-        
         try:
             if not packet.haslayer(IP):
                 return features, None
@@ -42,7 +32,6 @@ class FeatureExtractor:
             flow_key = (src_ip, dst_ip, sport, dport, proto)
             
             # --- [GRAPH LOGIC] ---
-            # Update node-level context (used as GNN node features later)
             self.node_stats[src_ip]["conn_count"] += 1
             self.node_stats[src_ip]["unique_dst"].add(dst_ip)
             
@@ -52,12 +41,10 @@ class FeatureExtractor:
             flow = self.flows[flow_key]
             
             flow["packets"].append(packet)
-            flow["timestamps"].append(time.time())
+            current_ts = time.time()
+            flow["timestamps"].append(current_ts)
             pkt_len = len(packet)
             flow["lengths"].append(pkt_len)
-            
-            if len(flow["packets"]) > 50:
-                for k in flow: flow[k] = flow[k][-50:]
             
             # Extract TCP flags
             last_flags = 0
@@ -66,11 +53,15 @@ class FeatureExtractor:
                 except: pass
             flow["flags"].append(last_flags)
             
-            # Calculate standard flow features (indices based on your existing model)
+            # Keep only last 50 for performance
+            if len(flow["packets"]) > 50:
+                for k in flow: flow[k] = flow[k][-50:]
+            
             lengths = flow["lengths"]
             pkt_count = len(lengths)
             total_len = float(sum(lengths))
             
+            # Feature Mapping (Aligned with GNN)
             features[0] = float(dport)
             features[1] = float(flow["timestamps"][-1] - flow["timestamps"][0] + 1e-9) if pkt_count > 1 else 0.0
             features[2] = float(pkt_count)
@@ -83,6 +74,12 @@ class FeatureExtractor:
                 features[7] = float(min(lengths))
                 features[8] = float(total_len / pkt_count)
             
+            # --- THE "BADASS" TIMING FEATURES ---
+            if pkt_count > 1:
+                iats = np.diff(flow["timestamps"])
+                features[9] = float(np.mean(iats))  # Mean IAT
+                features[10] = float(np.std(iats))  # IAT Std Dev
+            
             dur = features[1]
             if dur > 1e-6:
                 features[14] = float(total_len / dur)
@@ -91,19 +88,15 @@ class FeatureExtractor:
             features[34] = float(pkt_len)
             features[35] = float(pkt_len)
             
-            # PHASE 1 ADDITION: Register this flow in the graph builder
-            # We pass the packet_info and the currently extracted raw features
-            packet_info = {
-                "src_ip": src_ip, "dst_ip": dst_ip, 
-                "src_port": sport, "dst_port": dport, "protocol": proto
-            }
+            packet_info = {"src_ip": src_ip, "dst_ip": dst_ip, "src_port": sport, "dst_port": dport, "protocol": proto}
             self.graph_builder.add_packet(packet_info, features)
             
             return features, flow_key
-            
         except Exception as e:
             print(f"[!] Feature extraction error: {e}")
             return features, None
+
+    # (MinMax scaling methods remain unchanged from your previous version)
     
     def update_minmax(self, features):
         """Update min/max scaling parameters"""

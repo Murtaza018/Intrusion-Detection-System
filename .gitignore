@@ -35,3 +35,5 @@ dist/
 *.pcapng
 
 Backend/AI Model/GNN/training_data
+
+*.pth

@@ -12,6 +12,15 @@ load_dotenv(os.path.join(PROJECT_ROOT, ".env"))
 NETWORK_INTERFACE = "Wi-Fi 2"
 # NETWORK_INTERFACE = r"\Device\NPF_{98FACC85-B69E-4177-BBBF-0F143020C5D2}"
 
+# GNN Configuration
+GNN_MODEL_PATH = os.path.join(PROJECT_ROOT, "Backend", "AI Model", "GNN", "gnn_context_engine_final.pth")
+GNN_IN_CHANNELS = 36  # Matches your train_gnn.py
+GNN_EMBEDDING_DIM = 16
+
+MAE_MODEL_PATH = os.path.join(PROJECT_ROOT, "Backend", "AI Model", "MAE", "mae_visual_engine.pth")
+MAE_GRID_SIZE = 9
+MAE_MASK_RATIO = 0.4
+
 # Model paths
 MAIN_MODEL_REL_PATH = os.path.join("Adversarial Attack and Defense", "cicids_spatiotemporal_model_hardened.keras")
 AUTOENCODER_REL_PATH = os.path.join("Autoencoder", "cicids_autoencoder.keras")

@@ -4,6 +4,9 @@ import tensorflow as tf
 from tensorflow.keras.models import load_model
 import os
 import joblib
+import torch
+from GNN.train_gnn import ContextSAGE
+from mae_model import MAEModel
 
 # Suppress warnings
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
@@ -19,6 +22,8 @@ class ModelLoader:
         self.zero_day_model = None
         self.rf_model = None   
         self.xgb_model = None  
+        self.gnn_model = None
+        self.mae_model = None
         
     def load_models(self):
         """Load both Keras models"""
@@ -56,6 +61,18 @@ class ModelLoader:
             self.loaded_model.predict(dummy_input, verbose=0)
             self.zero_day_model.predict(dummy_input, verbose=0)
             print("[+] Model warmup complete.")
+
+            print(f"[*] Loading GNN Context Engine: {GNN_MODEL_PATH}...")
+            self.gnn_model = ContextSAGE(in_channels=GNN_IN_CHANNELS, embedding_dim=GNN_EMBEDDING_DIM)
+            self.gnn_model.load_state_dict(torch.load(GNN_MODEL_PATH, map_location=torch.device('cpu')))
+            self.gnn_model.eval()
+            print("[+] GNN loaded successfully.")
+
+            print(f"[*] Loading MAE Visual Engine: {MAE_MODEL_PATH}...")
+            self.mae_model = MAEModel()
+            self.mae_model.load_state_dict(torch.load(MAE_MODEL_PATH, map_location=torch.device('cpu')))
+            self.mae_model.eval()
+            print("[+] MAE loaded successfully.")
             
             return True
             
@@ -76,3 +93,9 @@ class ModelLoader:
     
     def get_xgb_model(self): 
         return self.xgb_model
+    
+    def get_gnn_model(self):
+        return self.gnn_model
+    
+    def get_mae_model(self):
+        return self.mae_model

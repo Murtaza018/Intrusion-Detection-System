@@ -59,94 +59,88 @@ class Detector:
             self.packet_queue.put(packet)
     
     def _detection_worker(self):
-        """Main detection worker thread"""
+        """Main detection worker thread: GNN + MAE + Ensemble Integration"""
+        import torch
+        import numpy as np
+        from config import GNN_IN_CHANNELS, MAE_MASK_RATIO
+        
         print("[*] Detection worker started")
+        gnn_model = self.model_loader.get_gnn_model()
+        mae_model = self.model_loader.get_mae_model()
         
         while self.running:
             try:
                 packet = self.packet_queue.get(timeout=1)
-                if packet is None:
-                    break
+                if packet is None: break
                 
-                # Clean up old flows periodically
                 self.feature_extractor.cleanup_old_flows()
-                
-                # Extract features (Raw List of floats)
                 features, flow_key = self.feature_extractor.extract_features(packet)
-                
-                # Update min/max and get scaled features
                 self.feature_extractor.update_minmax(features)
                 scaled_features = self.feature_extractor.scale_features(features)
                 
-                # Get packet info for Flutter
                 packet_info = self._get_packet_info(packet)
                 packet_id = self.packet_storage.get_next_packet_id()
                 
-                # Main classification
                 if self.feature_extractor.is_scaling_enabled():
-                    # Get models
+                    # --- [SENSORY LAYER 1: GNN CONTEXT] ---
+                    edge_index_np, edge_attr_np = self.feature_extractor.graph_builder.get_graph_data()
+                    context_vector = None
+                    if edge_index_np is not None and gnn_model is not None:
+                        # (GNN Inference Logic from Step 1)
+                        edge_index = torch.tensor(edge_index_np, dtype=torch.long)
+                        edge_attr = torch.tensor(edge_attr_np, dtype=torch.float)
+                        x_gnn = torch.zeros((self.feature_extractor.graph_builder.id_counter, GNN_IN_CHANNELS))
+                        x_gnn.index_add_(0, edge_index[0], edge_attr[:, :GNN_IN_CHANNELS])
+                        with torch.no_grad():
+                            z = gnn_model(x_gnn, edge_index)
+                            src_id = self.feature_extractor.graph_builder.ip_to_id.get(packet_info['src_ip'])
+                            if src_id is not None: context_vector = z[src_id].cpu().numpy()
+
+                    # --- [SENSORY LAYER 2: MAE VISUAL ANOMALY] ---
+                    mae_loss = 0.0
+                    if mae_model is not None:
+                        with torch.no_grad():
+                            feat_tensor = torch.tensor(scaled_features, dtype=torch.float)
+                            recon, original = mae_model(feat_tensor, mask_ratio=MAE_MASK_RATIO)
+                            mae_loss = torch.mean((recon - original)**2).item()
+
+                    # --- [ENSEMBLE CLASSIFICATION] ---
                     main_model = self.model_loader.get_main_model()
                     rf_model = self.model_loader.get_rf_model()
                     xgb_model = self.model_loader.get_xgb_model()
                     autoencoder = self.model_loader.get_autoencoder_model()
                     
-                    # 1. CNN Prediction (Binary)
                     cnn_prob = main_model.predict(scaled_features, verbose=0)[0][0]
+                    rf_prob = 1.0 - rf_model.predict_proba(scaled_features)[0][0]
+                    xgb_prob = 1.0 - xgb_model.predict_proba(scaled_features)[0][0]
                     
-                    # 2. RF Prediction (Multi-Class)
-                    # We assume class 0 is Normal, rest are Attack
-                    rf_all_probs = rf_model.predict_proba(scaled_features)[0]
-                    rf_prob = 1.0 - rf_all_probs[0]
-                    
-                    # 3. XGB Prediction (Multi-Class)
-                    xgb_all_probs = xgb_model.predict_proba(scaled_features)[0]
-                    xgb_prob = 1.0 - xgb_all_probs[0]
-                    
-                    # 4. Ensemble Voting (Max for Sensitivity)
-                    # Using MAX ensures if ANY model sees an attack, we flag it.
                     ensemble_prob = max(cnn_prob, rf_prob, xgb_prob)
                     
-                    # Debug logging
-                    if ensemble_prob > 0.1 or packet_id % 50 == 0:
-                        print(
-                            f"[VOTE] ID:{packet_id} | "
-                            f"CNN:{cnn_prob:.2f} RF:{rf_prob:.2f} XGB:{xgb_prob:.2f} | "
-                            f"FINAL:{ensemble_prob:.2f}"
-                        )
+                    # Log Sensory Results
+                    if packet_id % 50 == 0:
+                        print(f"[SENSE] ID:{packet_id} | GNN:{'YES' if context_vector is not None else 'NO'} | MAE_ERR:{mae_loss:.4f}")
 
                     if ensemble_prob > 0.40:
-                        # Known attack
-                        print(f"\n[!!!] ENSEMBLE ATTACK - ID:{packet_id} Score:{ensemble_prob:.4f}")
                         self._handle_known_attack(packet, packet_id, scaled_features, ensemble_prob, packet_info, features)
                     else:
-                        # Check for zero-day
+                        # Final Zero-Day Check (Standard AE + MAE Insight)
                         reconstruction = autoencoder.predict(scaled_features, verbose=0)
                         mse = np.mean(np.power(scaled_features - reconstruction, 2))
                         self.feature_extractor.add_reconstruction_error(mse)
-                        
                         threshold = self.feature_extractor.compute_dynamic_threshold()
                         
-                        if mse > threshold:
-                            # Zero-day anomaly
-                            print(f"\n[?!?] ZERO-DAY - ID:{packet_id} Error:{mse:.4f} > Thr:{threshold:.4f}")
+                        # Trigger alert if either the standard AE or the Visual MAE sees a massive spike
+                        if mse > threshold or mae_loss > 0.15: # 0.15 is a heuristic threshold
                             self._handle_zero_day(packet, packet_id, scaled_features, mse, packet_info, features)
                         else:
-                            # Normal traffic
-                            if self.packet_storage.get_stats()["total_packets"] % 20 == 0:
-                                print(".", end="", flush=True)
                             self._handle_normal(packet, packet_id, packet_info, features)
                 else:
-                    # Still in warmup, just record as normal
                     self._handle_normal(packet, packet_id, packet_info, features)
                 
                 self.packet_queue.task_done()
-                
-            except queue.Empty:
-                continue
             except Exception as e:
-                print(f"\n[!] Detection error: {e}")
-                traceback.print_exc()
-    
+                print(f"[!] Detection error: {e}")
+                
     def _xai_worker(self):
         """XAI explanation worker thread"""
         print("[*] XAI worker started")

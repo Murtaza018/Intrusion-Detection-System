@@ -6,7 +6,7 @@ import os
 import joblib
 import torch
 from GNN.train_gnn import ContextSAGE
-from mae_model import MAEModel
+from MAE.mae_model import MAEModel
 
 # Suppress warnings
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'

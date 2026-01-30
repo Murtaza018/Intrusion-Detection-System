@@ -10,7 +10,7 @@ class PacketDetailDialog extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Determine width based on screen size to be responsive
+    // Determine width based on screen size to be responsive - user's original layout
     double width = MediaQuery.of(context).size.width * 0.85;
     double height = MediaQuery.of(context).size.height * 0.85;
 
@@ -57,7 +57,7 @@ class PacketDetailDialog extends StatelessWidget {
                             _buildInfoGrid(),
                             if (packet.confidence > 0) ...[
                               SizedBox(height: 32),
-                              _buildSectionTitle('AI Detection Score'),
+                              _buildSectionTitle('Hybrid Ensemble Score'),
                               _buildDetectionInfo(),
                             ],
                           ],
@@ -66,7 +66,7 @@ class PacketDetailDialog extends StatelessWidget {
                     ),
                   ),
 
-                  // RIGHT COLUMN: XAI Explanation
+                  // RIGHT COLUMN: XAI Explanation (Updated for Point 2 & 3)
                   Expanded(
                     flex: 6,
                     child: Container(
@@ -105,94 +105,7 @@ class PacketDetailDialog extends StatelessWidget {
     );
   }
 
-// ... (Imports and Build method identical to previous wide version) ...
-// Replace only the _buildFooter method with this logic:
-
-  Widget _buildFooter(BuildContext context) {
-    final provider = Provider.of<IdsProvider>(context, listen: false);
-    bool isSelected = provider.isSelected(packet.id);
-
-    // Logic for Buttons based on packet status
-    List<Widget> buttons = [];
-
-    if (packet.status == 'normal') {
-      // Normal Packet Options
-      buttons.add(_buildActionButton(context, provider,
-          icon: Icons.bug_report,
-          label: "Report Missed Attack",
-          color: Colors.red,
-          queueType: 'gan' // False Negative -> GAN
-          ));
-    } else {
-      // Attack / Zero-Day Options
-      buttons.add(_buildActionButton(context, provider,
-          icon: Icons.thumb_up_alt_outlined,
-          label: "Report False Alarm",
-          color: Colors.green,
-          queueType: 'jitter' // False Positive -> Jittering
-          ));
-
-      if (packet.status == 'zero_day') {
-        buttons.add(SizedBox(width: 12));
-        buttons.add(_buildActionButton(context, provider,
-            icon: Icons.science,
-            label: "Confirm Zero-Day",
-            color: Colors.deepPurple,
-            queueType: 'gan' // True Zero-Day -> GAN
-            ));
-      }
-    }
-
-    // Toggle Button (If already selected)
-    if (isSelected) {
-      buttons = [
-        OutlinedButton.icon(
-          onPressed: () {
-            provider.toggleSelection(packet, ''); // Removes it
-            Navigator.pop(context);
-          },
-          icon: Icon(Icons.remove_circle_outline),
-          label: Text("Remove from List"),
-          style: OutlinedButton.styleFrom(foregroundColor: Colors.grey),
-        )
-      ];
-    }
-
-    return Container(
-      padding: EdgeInsets.all(16),
-      decoration: BoxDecoration(
-          color: Colors.grey[50],
-          borderRadius: BorderRadius.vertical(bottom: Radius.circular(16)),
-          border: Border(top: BorderSide(color: Colors.grey[200]!))),
-      child: Row(mainAxisAlignment: MainAxisAlignment.end, children: buttons),
-    );
-  }
-
-  Widget _buildActionButton(BuildContext context, IdsProvider provider,
-      {required IconData icon,
-      required String label,
-      required Color color,
-      required String queueType}) {
-    return ElevatedButton.icon(
-      onPressed: () {
-        // Simple Toggle for everything. Labeling happens later on Adaptation Screen.
-        provider.toggleSelection(packet, queueType);
-
-        Navigator.pop(context);
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text(
-              'Added to ${queueType.toUpperCase()} Queue. Label it in the Adapt tab.'),
-          backgroundColor: color,
-          duration: Duration(seconds: 1),
-        ));
-      },
-      icon: Icon(icon, size: 18),
-      label: Text(label),
-      style: ElevatedButton.styleFrom(
-          backgroundColor: color, foregroundColor: Colors.white),
-    );
-  }
-
+  // --- HEADER WIDGET ---
   Widget _buildHeader(BuildContext context) {
     Color statusColor = _getStatusColor(packet.status);
     IconData statusIcon = _getStatusIcon(packet.status);
@@ -254,21 +167,211 @@ class PacketDetailDialog extends StatelessWidget {
     );
   }
 
-  // ... (Paste _buildSectionTitle, _buildInfoGrid, _buildDetectionInfo, _buildExplanationSection and its children here from the previous version) ...
-  // Assuming you have the code for these widgets from the previous turn. If you need them repeated, let me know!
+  // --- AI ANALYSIS SECTION (ROADMAP UPDATE) ---
+  Widget _buildExplanationSection(BuildContext context) {
+    final explanation = packet.explanation!;
+    final String type = explanation['type'] ?? 'UNKNOWN';
 
-  Widget _buildSectionTitle(String title) {
-    return Padding(
-      padding: EdgeInsets.only(bottom: 16),
-      child: Text(title,
-          style: TextStyle(
-              fontSize: 14,
-              fontWeight: FontWeight.w700,
-              color: Colors.grey[500],
-              letterSpacing: 1.0)),
+    // If still in the background processing queue
+    if (type == 'INITIAL_DETECTION' || type.contains('FALLBACK')) {
+      return _buildFallbackExplanation(explanation);
+    }
+
+    final List<dynamic> factors = explanation['top_contributing_factors'] ?? [];
+    final Map<String, dynamic> sensory = explanation['sensory_analysis'] ?? {};
+
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      _buildExplanationHeader(explanation),
+      SizedBox(height: 20),
+
+      // Description Box
+      Container(
+        padding: EdgeInsets.all(16),
+        decoration: BoxDecoration(
+            color: Colors.blue[50]!.withOpacity(0.5),
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: Colors.blue[100]!)),
+        child: Text(explanation['description'] ?? 'No description.',
+            style:
+                TextStyle(fontSize: 14, height: 1.5, color: Colors.blue[900])),
+      ),
+      SizedBox(height: 24),
+
+      // POINT 3: SENSORY INSIGHTS TILE
+      if (sensory.isNotEmpty) ...[
+        _buildSectionTitle('Sensory Engine Insights'),
+        Row(
+          children: [
+            Expanded(
+                child: _buildSensorySmallTile("Topological (GNN)",
+                    sensory['topological_shift'] ?? "Stable", Icons.hub)),
+            SizedBox(width: 12),
+            Expanded(
+                child: _buildSensorySmallTile(
+                    "Visual (MAE)",
+                    sensory['visual_anomaly'] ?? "Consistent",
+                    Icons.grid_view)),
+          ],
+        ),
+        SizedBox(height: 24),
+      ],
+
+      // POINT 2: SHAP FEATURE CONTRIBUTION
+      if (factors.isNotEmpty) ...[
+        _buildSectionTitle('Hybrid Feature Impact (SHAP)'),
+        ...factors
+            .map((f) => _buildFactorTile(f as Map<String, dynamic>))
+            .toList(),
+        SizedBox(height: 24),
+      ],
+
+      if (explanation['recommended_actions'] != null)
+        _buildRecommendedActions(explanation['recommended_actions']),
+    ]);
+  }
+
+  // --- SUB-WIDGETS FOR EXPLANATION ---
+  Widget _buildSensorySmallTile(String label, String value, IconData icon) {
+    bool isAnomalous = value != "Stable" && value != "Consistent";
+    Color color = isAnomalous ? Colors.orange : Colors.green;
+    return Container(
+      padding: EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.05),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: color.withOpacity(0.2)),
+      ),
+      child: Row(
+        children: [
+          Icon(icon, size: 16, color: color),
+          SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(label,
+                    style: TextStyle(fontSize: 10, color: Colors.grey[600])),
+                Text(value,
+                    style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                        color: color)),
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 
+  Widget _buildFactorTile(Map<String, dynamic> factor) {
+    bool isRisk = factor['impact'].toString().contains('Increased');
+    Color color = isRisk ? Colors.red : Colors.green;
+    double magnitude = double.tryParse(factor['magnitude'] ?? '0.0') ?? 0.0;
+
+    // Feature classification for GNN/MAE icons
+    IconData factorIcon = Icons.bar_chart;
+    if (factor['factor'].toString().contains('GNN')) factorIcon = Icons.hub;
+    if (factor['factor'].toString().contains('MAE'))
+      factorIcon = Icons.grid_view;
+
+    return Container(
+      margin: EdgeInsets.only(bottom: 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(factorIcon, size: 14, color: Colors.grey),
+              SizedBox(width: 8),
+              Expanded(
+                  child: Text(factor['factor'],
+                      style: TextStyle(
+                          fontWeight: FontWeight.w600, fontSize: 13))),
+              Text(factor['observed_value'],
+                  style: TextStyle(fontSize: 11, color: Colors.grey)),
+            ],
+          ),
+          SizedBox(height: 4),
+          Row(
+            children: [
+              Expanded(
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(4),
+                  child: LinearProgressIndicator(
+                    value: (magnitude * 2).clamp(0.05, 1.0),
+                    backgroundColor: Colors.grey[100],
+                    color: color,
+                    minHeight: 6,
+                  ),
+                ),
+              ),
+              SizedBox(width: 12),
+              Text(isRisk ? "+$magnitude" : "-$magnitude",
+                  style: TextStyle(
+                      fontWeight: FontWeight.bold, fontSize: 12, color: color)),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  // --- FOOTER BUTTONS (RESTORED LOGIC) ---
+  Widget _buildFooter(BuildContext context) {
+    final provider = Provider.of<IdsProvider>(context, listen: false);
+    bool isSelected = provider.isSelected(packet.id);
+
+    List<Widget> buttons = [];
+
+    if (packet.status == 'normal') {
+      buttons.add(_buildActionButton(context, provider,
+          icon: Icons.bug_report,
+          label: "Report Missed Attack",
+          color: Colors.red,
+          queueType: 'gan'));
+    } else {
+      buttons.add(_buildActionButton(context, provider,
+          icon: Icons.thumb_up_alt_outlined,
+          label: "Report False Alarm",
+          color: Colors.green,
+          queueType: 'jitter'));
+
+      if (packet.status == 'zero_day') {
+        buttons.add(SizedBox(width: 12));
+        buttons.add(_buildActionButton(context, provider,
+            icon: Icons.science,
+            label: "Confirm Zero-Day",
+            color: Colors.deepPurple,
+            queueType: 'gan'));
+      }
+    }
+
+    if (isSelected) {
+      buttons = [
+        OutlinedButton.icon(
+          onPressed: () {
+            provider.toggleSelection(packet, '');
+            Navigator.pop(context);
+          },
+          icon: Icon(Icons.remove_circle_outline),
+          label: Text("Remove from List"),
+          style: OutlinedButton.styleFrom(foregroundColor: Colors.grey),
+        )
+      ];
+    }
+
+    return Container(
+      padding: EdgeInsets.all(16),
+      decoration: BoxDecoration(
+          color: Colors.grey[50],
+          borderRadius: BorderRadius.vertical(bottom: Radius.circular(16)),
+          border: Border(top: BorderSide(color: Colors.grey[200]!))),
+      child: Row(mainAxisAlignment: MainAxisAlignment.end, children: buttons),
+    );
+  }
+
+  // --- TECHNICAL SPEC HELPERS ---
   Widget _buildInfoGrid() {
     return Column(
       children: [
@@ -310,7 +413,7 @@ class PacketDetailDialog extends StatelessWidget {
               SizedBox(height: 2),
               Text(value,
                   style: TextStyle(
-                      fontSize: 15,
+                      fontSize: 14,
                       fontWeight: FontWeight.w500,
                       color: Colors.grey[800],
                       fontFamily: 'RobotoMono')),
@@ -329,16 +432,13 @@ class PacketDetailDialog extends StatelessWidget {
         color: Colors.white,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: statusColor.withOpacity(0.3), width: 1.5),
-        boxShadow: [
-          BoxShadow(color: statusColor.withOpacity(0.05), blurRadius: 10)
-        ],
       ),
       child: Column(
         children: [
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text("Model Confidence",
+              Text("Detection Confidence",
                   style: TextStyle(fontSize: 14, color: Colors.grey[700])),
               Text('${(packet.confidence * 100).toStringAsFixed(1)}%',
                   style: TextStyle(
@@ -360,74 +460,39 @@ class PacketDetailDialog extends StatelessWidget {
     );
   }
 
-  Widget _buildExplanationSection(BuildContext context) {
-    final explanation = packet.explanation!;
-    final String type = explanation['type'] ?? 'UNKNOWN';
-
-    if (type == 'INITIAL_DETECTION' || type.contains('FALLBACK')) {
-      return _buildFallbackExplanation(explanation);
-    }
-
-    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      _buildExplanationHeader(explanation),
-      SizedBox(height: 20),
-
-      // Description Box
-      Container(
-        padding: EdgeInsets.all(16),
-        decoration: BoxDecoration(
-            color: Colors.blue[50]!.withOpacity(0.5),
-            borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: Colors.blue[100]!)),
-        child: Text(explanation['description'] ?? 'No description.',
-            style:
-                TextStyle(fontSize: 14, height: 1.5, color: Colors.blue[900])),
-      ),
-      SizedBox(height: 24),
-
-      if (explanation['key_indicators'] != null) ...[
-        _buildKeyIndicators(explanation['key_indicators']),
-        SizedBox(height: 24),
-      ],
-
-      if (explanation['top_contributing_factors'] != null)
-        _buildContributingFactors(explanation['top_contributing_factors']),
-
-      SizedBox(height: 24),
-
-      if (explanation['recommended_actions'] != null)
-        _buildRecommendedActions(explanation['recommended_actions']),
-    ]);
+  // --- GENERAL HELPERS ---
+  Widget _buildSectionTitle(String title) {
+    return Padding(
+      padding: EdgeInsets.only(bottom: 16),
+      child: Text(title,
+          style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w700,
+              color: Colors.grey[500],
+              letterSpacing: 1.2)),
+    );
   }
 
-  Widget _buildKeyIndicators(dynamic indicatorsData) {
-    List<String> indicators = (indicatorsData is List)
-        ? indicatorsData.map((e) => e.toString()).toList()
-        : [];
-    if (indicators.isEmpty) return SizedBox.shrink();
-
-    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Text('Key Indicators',
-          style: TextStyle(
-              fontSize: 13,
-              fontWeight: FontWeight.bold,
-              color: Colors.grey[700])),
-      SizedBox(height: 8),
-      Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: indicators
-              .map((indicator) => Chip(
-                    label: Text(indicator),
-                    backgroundColor: Colors.white,
-                    labelStyle:
-                        TextStyle(color: Colors.grey[800], fontSize: 12),
-                    side: BorderSide(color: Colors.grey[300]!),
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(6)),
-                  ))
-              .toList()),
-    ]);
+  Widget _buildActionButton(BuildContext context, IdsProvider provider,
+      {required IconData icon,
+      required String label,
+      required Color color,
+      required String queueType}) {
+    return ElevatedButton.icon(
+      onPressed: () {
+        provider.toggleSelection(packet, queueType);
+        Navigator.pop(context);
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(
+              'Packet #${packet.id} added to ${queueType.toUpperCase()} queue for adaptation.'),
+          backgroundColor: color,
+        ));
+      },
+      icon: Icon(icon, size: 18),
+      label: Text(label),
+      style: ElevatedButton.styleFrom(
+          backgroundColor: color, foregroundColor: Colors.white),
+    );
   }
 
   Widget _buildExplanationHeader(Map<String, dynamic> explanation) {
@@ -437,23 +502,22 @@ class PacketDetailDialog extends StatelessWidget {
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
         Expanded(
-          child:
-              Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(
-                explanation['title']
-                        ?.toString()
-                        .replaceAll('⚠️ ', '')
-                        .replaceAll('🚨 ', '') ??
-                    'Analysis',
-                style: TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.grey[800])),
-            if (explanation['attack_classification'] != null)
-              Text(explanation['attack_classification'],
-                  style: TextStyle(fontSize: 13, color: Colors.grey[600])),
-          ]),
-        ),
+            child:
+                Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(
+              explanation['title']
+                      ?.toString()
+                      .replaceAll('⚠️ ', '')
+                      .replaceAll('🚨 ', '') ??
+                  'Analysis',
+              style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.grey[800])),
+          if (explanation['attack_classification'] != null)
+            Text(explanation['attack_classification'],
+                style: TextStyle(fontSize: 13, color: Colors.grey[600])),
+        ])),
         Container(
           padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
           decoration: BoxDecoration(
@@ -462,48 +526,9 @@ class PacketDetailDialog extends StatelessWidget {
               border: Border.all(color: riskColor)),
           child: Text('$riskLevel RISK',
               style: TextStyle(
-                  color: riskColor, fontWeight: FontWeight.bold, fontSize: 12)),
+                  color: riskColor, fontWeight: FontWeight.bold, fontSize: 11)),
         ),
       ],
-    );
-  }
-
-  Widget _buildContributingFactors(dynamic factorsData) {
-    List<dynamic> factors = factorsData is List ? factorsData : [];
-
-    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Text('Top Contributing Factors',
-          style: TextStyle(
-              fontSize: 13,
-              fontWeight: FontWeight.bold,
-              color: Colors.grey[700])),
-      SizedBox(height: 12),
-      ...factors
-          .map((factor) => _buildFactorTile(factor as Map<String, dynamic>)),
-    ]);
-  }
-
-  Widget _buildFactorTile(Map<String, dynamic> factor) {
-    bool isRisk = factor['impact'].toString().contains('Increased');
-    Color color = isRisk ? Colors.red : Colors.green;
-    return Container(
-      margin: EdgeInsets.only(bottom: 8),
-      padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: Colors.grey[200]!)),
-      child: Row(children: [
-        Icon(isRisk ? Icons.arrow_upward : Icons.arrow_downward,
-            color: color, size: 16),
-        SizedBox(width: 12),
-        Expanded(
-            child: Text(factor['factor'],
-                style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
-        Text(factor['magnitude'].toString(),
-            style: TextStyle(
-                fontWeight: FontWeight.bold, fontSize: 13, color: color)),
-      ]),
     );
   }
 
@@ -511,19 +536,17 @@ class PacketDetailDialog extends StatelessWidget {
     List<String> actions =
         (actionsData as List).map((e) => e.toString()).toList();
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Text('Recommended Actions',
-          style: TextStyle(
-              fontSize: 13,
-              fontWeight: FontWeight.bold,
-              color: Colors.grey[700])),
-      SizedBox(height: 8),
+      _buildSectionTitle('Recommended Actions'),
       ...actions
           .map((action) => Padding(
-                padding: EdgeInsets.only(bottom: 6),
+                padding: EdgeInsets.only(bottom: 8),
                 child: Row(children: [
                   Icon(Icons.check_circle, size: 16, color: Colors.green),
                   SizedBox(width: 8),
-                  Expanded(child: Text(action, style: TextStyle(fontSize: 13))),
+                  Expanded(
+                      child: Text(action,
+                          style: TextStyle(
+                              fontSize: 13, color: Colors.grey[700]))),
                 ]),
               ))
           .toList(),
@@ -532,16 +555,21 @@ class PacketDetailDialog extends StatelessWidget {
 
   Widget _buildFallbackExplanation(Map<String, dynamic> explanation) {
     return Center(
-        child: Column(children: [
-      CircularProgressIndicator(),
-      SizedBox(height: 16),
-      Text("Analyzing...", style: TextStyle(color: Colors.grey))
+        child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+      SizedBox(height: 100),
+      CircularProgressIndicator(strokeWidth: 3, color: Colors.deepPurple),
+      SizedBox(height: 24),
+      Text("AI Explainer is generating SHAP values...",
+          style:
+              TextStyle(color: Colors.grey[600], fontWeight: FontWeight.w500)),
+      SizedBox(height: 8),
+      Text("This takes 2-3 seconds per anomaly.",
+          style: TextStyle(color: Colors.grey[400], fontSize: 12)),
     ]));
   }
 
-  // Helpers
   String _formatTime(DateTime timestamp) =>
-      '${timestamp.hour}:${timestamp.minute}:${timestamp.second}';
+      '${timestamp.hour}:${timestamp.minute.toString().padLeft(2, '0')}:${timestamp.second.toString().padLeft(2, '0')}';
   Color _getStatusColor(String status) => status == 'known_attack'
       ? Colors.red
       : (status == 'zero_day' ? Colors.orange : Colors.green);

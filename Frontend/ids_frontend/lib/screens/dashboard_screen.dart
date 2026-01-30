@@ -2,7 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/ids_provider.dart';
 import '../widgets/packet_list.dart';
-import 'adaptation_screen.dart'; // Ensure this import exists
+import '../widgets/sensory_dashboard_widget.dart'; // Import the new Sensory Gauges
+import 'adaptation_screen.dart';
 
 class DashboardScreen extends StatelessWidget {
   @override
@@ -21,7 +22,7 @@ class DashboardScreen extends StatelessWidget {
         backgroundColor: Colors.white,
         foregroundColor: Colors.black87,
         actions: [
-          // ADAPT BUTTON (New: Shows when packets are selected)
+          // ADAPT BUTTON (Shows when packets are selected for continual learning)
           if (provider.totalSelected > 0)
             Padding(
               padding: const EdgeInsets.only(right: 8.0),
@@ -45,7 +46,7 @@ class DashboardScreen extends StatelessWidget {
       ),
       body: Column(
         children: [
-          // Compact Stats Row
+          // 1. Compact Stats Row
           Container(
             color: Colors.white,
             padding: EdgeInsets.symmetric(vertical: 12, horizontal: 16),
@@ -68,7 +69,15 @@ class DashboardScreen extends StatelessWidget {
 
           Divider(height: 1),
 
-          // Packet List
+          // 2. NEW: SENSORY VISUALIZATION (Roadmap Point 3)
+          // Displays GNN (Topological) and MAE (Visual) gauges
+          if (provider.isRunning)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+              child: SensoryDashboard(),
+            ),
+
+          // 3. Packet List (Scrollable Logs)
           Expanded(
             child: PacketList(),
           ),
@@ -111,16 +120,14 @@ class DashboardScreen extends StatelessWidget {
     );
   }
 
-  // FIX: Compact Stat Widget (Self-Contained Provider Logic)
+  // Compact Stat Widget (Self-Contained Provider Logic)
   Widget _buildCompactStat(BuildContext context, String label, int value,
       Color color, String filter) {
-    // 1. Listen to filter changes to highlight selection
     final currentFilter = Provider.of<IdsProvider>(context).currentFilter;
     bool isSelected = currentFilter == filter;
 
     return Expanded(
       child: InkWell(
-        // 2. Use listen: false for the action (Fixes the error)
         onTap: () =>
             Provider.of<IdsProvider>(context, listen: false).setFilter(filter),
         borderRadius: BorderRadius.circular(12),

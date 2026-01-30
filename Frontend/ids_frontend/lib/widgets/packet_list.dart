@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/ids_provider.dart';
 import 'packet_detail_dialog.dart';
+import 'mae_visualizer_dialog.dart'; // Import the new dialog
 
 class PacketList extends StatelessWidget {
   @override
@@ -74,7 +75,6 @@ class PacketListItem extends StatelessWidget {
 
     return Card(
       elevation: isSelected ? 4 : 1,
-      // Highlight color if selected
       color: isSelected ? Colors.deepPurple.shade50 : Colors.white,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(12),
@@ -85,19 +85,41 @@ class PacketListItem extends StatelessWidget {
       margin: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       child: ListTile(
         leading: Icon(statusIcon, color: statusColor),
-        title:
-            Text(packet.summary, style: TextStyle(fontWeight: FontWeight.w500)),
-        subtitle:
-            Text('${packet.srcIp} → ${packet.dstIp} • ${packet.protocol}'),
-        trailing: Chip(
-          label: Text(statusText,
-              style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 10,
-                  fontWeight: FontWeight.bold)),
-          backgroundColor: statusColor,
-          padding: EdgeInsets.zero,
+        title: Text(packet.summary,
+            style: TextStyle(fontWeight: FontWeight.w500, fontSize: 13)),
+        subtitle: Text('${packet.srcIp} → ${packet.dstIp} • ${packet.protocol}',
+            style: TextStyle(fontSize: 11)),
+
+        // --- UPDATED TRAILING SECTION (ROADMAP POINT 3) ---
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // Only show visualizer for anomalies or zero-days
+            if (packet.status == 'zero_day' || packet.maeAnomaly > 0.1)
+              IconButton(
+                icon: Icon(Icons.grid_view_rounded,
+                    color: Colors.orangeAccent, size: 20),
+                tooltip: 'View MAE Structure',
+                onPressed: () => showDialog(
+                  context: context,
+                  builder: (_) => MaeVisualizerDialog(packet: packet),
+                ),
+              ),
+
+            // Status Chip
+            Chip(
+              label: Text(statusText,
+                  style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 9,
+                      fontWeight: FontWeight.bold)),
+              backgroundColor: statusColor,
+              padding: EdgeInsets.zero,
+              visualDensity: VisualDensity.compact,
+            ),
+          ],
         ),
+
         onTap: () => showDialog(
             context: context,
             builder: (_) => PacketDetailDialog(packet: packet)),

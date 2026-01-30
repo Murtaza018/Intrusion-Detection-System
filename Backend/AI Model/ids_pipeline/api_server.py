@@ -15,16 +15,14 @@ from config import API_KEY
 
 # --- RETRAINER IMPORTS ---
 from gan_retrainer import GanRetrainer
-# from jitter_retrainer import JitterRetrainer 
 
 # --- HELPER FUNCTIONS ---
 def calculate_group_consistency(feature_list):
-    # Calculates Cosine Similarity for consistency checks.
+    """Calculates Cosine Similarity for consistency checks."""
     if not feature_list or len(feature_list) < 2: return 1.0
     matrix = np.array(feature_list)
     try:
         sim_matrix = cosine_similarity(matrix)
-        # Get upper triangle elements excluding the diagonal.
         iu = np.triu_indices(len(sim_matrix), k=1)
         if len(iu[0]) == 0: return 1.0
         avg_similarity = np.mean(sim_matrix[iu])
@@ -32,7 +30,7 @@ def calculate_group_consistency(feature_list):
     except: return 0.0
 
 class APIServer:
-    # Flask API server for the IDS frontend.
+    """Flask API server for the Hybrid IDS frontend."""
     
     def __init__(self, packet_storage, feature_extractor, pipeline_manager, model_loader):
         self.app = Flask(__name__)
@@ -46,13 +44,12 @@ class APIServer:
         
         # Initialize Retrainers
         self.gan_retrainer = GanRetrainer(packet_storage, feature_extractor)
-        # self.jitter_retrainer = JitterRetrainer(packet_storage, feature_extractor, model_loader) 
 
         # Setup Routes
         self._register_routes()
     
     def _register_routes(self):
-        # Setup Flask routes with API key authentication.
+        """Setup Flask routes with API key authentication."""
         
         def require_api_key(f):
             @wraps(f)
@@ -108,150 +105,123 @@ class APIServer:
             status = request.args.get('status', default=None, type=str)
             
             packets = self.packet_storage.get_packets(limit=limit, offset=offset, status_filter=status)
-            
             return jsonify({
                 "packets": packets,
                 "count": len(packets),
-                "filter": status,
                 "timestamp": datetime.now().isoformat()
             })
+
+        # --- NEW: REAL-TIME SENSORY DATA (For Flutter Dashboard Gauges) ---
+        @self.app.route("/api/sensory/live", methods=['GET'])
+        @require_api_key
+        def get_live_sensory():
+            """
+            Fetches the latest GNN and MAE scores from the most recent packet.
+            This satisfies the Point 3 roadmap for real-time sensor visualization.
+            """
+            recent = self.packet_storage.get_packets(limit=1)
+            if recent:
+                p = recent[0]
+                expl = p.get('explanation', {})
+                # Extract the sensory metrics we injected in detector.py
+                return jsonify({
+                    "gnn_anomaly": expl.get('gnn_anomaly', 0.0),
+                    "mae_anomaly": expl.get('mae_anomaly', 0.0),
+                    "status": p.get('status', 'unknown'),
+                    "timestamp": datetime.now().isoformat()
+                })
+            return jsonify({"gnn_anomaly": 0.0, "mae_anomaly": 0.0})
 
         @self.app.route("/api/stats", methods=['GET'])
         @require_api_key
         def get_stats():
             stats = self.packet_storage.get_stats()
+            
+            # Enrich stats with current sensory health (avg of last 50 packets)
+            recent_packets = self.packet_storage.get_packets(limit=50)
+            if recent_packets:
+                mae_vals = [p.get('explanation', {}).get('mae_anomaly', 0) for p in recent_packets]
+                stats["avg_visual_anomaly"] = round(float(np.mean(mae_vals)), 4)
+            else:
+                stats["avg_visual_anomaly"] = 0.0
+
             try:
                 mem = psutil.Process().memory_info().rss / 1024 / 1024
                 stats["memory_usage_mb"] = round(mem, 1)
             except: 
                 stats["memory_usage_mb"] = 0.0
+            
             stats["current_time"] = datetime.now().isoformat()
             return jsonify(stats)
-
-        @self.app.route("/api/system/health", methods=['GET'])
-        @require_api_key
-        def get_health():
-            try:
-                mem = round(psutil.Process().memory_info().rss / 1024 / 1024, 1)
-            except: mem = 0.0
-            
-            return jsonify({
-                "memory_mb": mem,
-                "total_packets_processed": self.packet_storage.get_stats()["total_packets"],
-                "pipeline_running": self.pipeline_manager.is_running(),
-                "timestamp": datetime.now().isoformat()
-            })
 
         # --- 3. LABELS ---
         @self.app.route("/api/labels", methods=['GET'])
         @require_api_key
         def get_labels():
             try:
+                # Search for the label encoder to provide dynamic classes to Flutter
                 possible_paths = [
                     "ids_pipeline/label_encoder.pkl",
                     "label_encoder.pkl",
-                    os.path.join(os.path.dirname(os.path.abspath(__file__)), "label_encoder.pkl")
+                    os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "label_encoder.pkl")
                 ]
                 target_path = next((p for p in possible_paths if os.path.exists(p)), None)
                 
                 if target_path:
                     encoder = joblib.load(target_path)
                     return jsonify({"labels": list(encoder.classes_)})
-            except Exception as e:
-                # Log the error but don't show to user
-                pass
-            
-            return jsonify({"labels": ["BENIGN", "DDoS", "PortScan", "Bot"]})
+            except: pass
+            return jsonify({"labels": ["BENIGN", "DDoS", "PortScan", "Bot", "WebAttack"]})
 
-        # --- 4. ANALYSIS (CONSISTENCY CHECK) ---
+        # --- 4. CONTINUAL LEARNING (GAN ANALYSIS) ---
         @self.app.route("/api/analyze_selection", methods=['POST'])
         @require_api_key
         def analyze_selection():
             data = request.json
             gan_ids = [p['id'] for p in data.get('gan_queue', [])]
-            jitter_ids = [p['id'] for p in data.get('jitter_queue', [])]
             
-            response = {
-                "gan_score": 0.0, "gan_status": "Insufficient Data",
-                "jitter_score": 0.0, "jitter_status": "Insufficient Data"
-            }
+            response = {"gan_score": 0.0, "gan_status": "Insufficient Data"}
 
-            def get_valid_features(ids):
-                raw_feats = self.packet_storage.get_features_for_training(ids)
-                return [f for f in raw_feats if f and len(f) > 0]
-
-            # GAN Queue Analysis
             if gan_ids:
-                feats = get_valid_features(gan_ids)
+                raw_feats = self.packet_storage.get_features_for_training(gan_ids)
+                feats = [f for f in raw_feats if f is not None and len(f) > 0]
+                
                 if len(feats) > 1:
-                    try:
-                        score = calculate_group_consistency(feats)
-                        response["gan_score"] = round(score, 4)
-                        if score > 0.9: response["gan_status"] = "Excellent (Homogeneous)"
-                        elif score > 0.6: response["gan_status"] = "Mixed (Caution)"
-                        else: response["gan_status"] = "Poor (Too Diverse)"
-                    except: response["gan_status"] = "Error"
+                    score = calculate_group_consistency(feats)
+                    response["gan_score"] = round(score, 4)
+                    if score > 0.9: response["gan_status"] = "Excellent (Homogeneous)"
+                    elif score > 0.6: response["gan_status"] = "Mixed (Caution)"
+                    else: response["gan_status"] = "Poor (Too Diverse)"
                 elif len(feats) == 1:
                     response["gan_score"] = 1.0
                     response["gan_status"] = "Single Item"
 
-            # Jitter Queue Analysis
-            if jitter_ids:
-                feats = get_valid_features(jitter_ids)
-                if len(feats) > 1:
-                    try:
-                        score = calculate_group_consistency(feats)
-                        response["jitter_score"] = round(score, 4)
-                        response["jitter_status"] = "Consistent" if score > 0.85 else "Varied"
-                    except: response["jitter_status"] = "Error"
-                elif len(feats) == 1:
-                    response["jitter_score"] = 1.0
-                    response["jitter_status"] = "Single Item"
-
             return jsonify(response)
 
-        # --- 5. RETRAINING LOGIC (GAN + JITTER) ---
         @self.app.route("/api/retrain", methods=['POST'])
         @require_api_key
         def trigger_retrain():
+            """Triggers the WGAN-GP retrainer for Point 1 & 2 Roadmap alignment."""
             data = request.json
             if not data: return jsonify({"error": "No data provided"}), 400
             
             gan_packets = data.get('gan_queue', [])
-            jitter_packets = data.get('jitter_queue', [])
             target_label = data.get('target_label', 'Unknown_Attack')
             is_new_label = data.get('is_new_label', False)
             
-            if not gan_packets and not jitter_packets:
+            if not gan_packets:
                 return jsonify({"message": "No packets to retrain on."}), 200
 
-            messages = []
-
-            # A. GAN Retraining
-            if gan_packets:
-                gan_ids = [p['id'] for p in gan_packets]
-                
-                result = self.gan_retrainer.retrain(gan_ids, target_label, is_new_label)
-                messages.append(f"GAN: {result['message']}")
-                
-                if result['status'] == 'error':
-                    # Log error internally.
-                    pass
-
-            # B. Jitter Retraining (Disabled)
-            if jitter_packets:
-                messages.append("Jitter: Skipped (Disabled in Code)")
-
-            full_message = " | ".join(messages)
+            gan_ids = [p['id'] for p in gan_packets]
+            result = self.gan_retrainer.retrain(gan_ids, target_label, is_new_label)
 
             return jsonify({
-                "status": "success", 
-                "message": full_message,
-                "gan_count": len(gan_packets),
-                "jitter_count": len(jitter_packets)
+                "status": "success" if result['status'] == 'success' else "error", 
+                "message": result['message'],
+                "gan_count": len(gan_packets)
             })
 
     def run(self, host="0.0.0.0", port=5001):
-        # Run the Flask server.
-        print(f"Starting Flask server on http://{host}:{port}")
+        """Run the Flask server."""
+        print(f"[*] Starting Production API on http://{host}:{port}")
         self.app.run(host=host, port=port, debug=True, use_reloader=False)

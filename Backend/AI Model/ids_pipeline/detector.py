@@ -63,14 +63,18 @@ class Detector:
             self.packet_queue.put(packet)
 
     def _detection_worker(self):
-        """Main detection loop incorporating sensory fusion (95 features)"""
         print("[*] Detection worker started")
         gnn_model = self.model_loader.get_gnn_model()
         mae_model = self.model_loader.get_mae_model()
         
         while self.running:
             try:
-                packet = self.packet_queue.get(timeout=1)
+            # Change timeout logic to handle empty queue silently
+                try:
+                    packet = self.packet_queue.get(timeout=1)
+                except queue.Empty:
+                    continue # Silent skip if no packets arrive
+                
                 if packet is None: break
                 
                 # 1. Feature Extraction & Scaling (Raw 78)

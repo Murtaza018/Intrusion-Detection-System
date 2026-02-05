@@ -66,6 +66,7 @@ class XAIExplainer:
                 print(f"[!] SHAP Init Failed: {e}")
                 return False
     
+    
     def generate_explanation(self, features, model_predict_func, confidence, packet_info, attack_type="Attack"):
         """Generate explanation accounting for Raw, Topological, and Visual features"""
         try:
@@ -73,16 +74,24 @@ class XAIExplainer:
                 if not self.initialize_shap(model_predict_func):
                     return self._generate_fallback_explanation(features, confidence, packet_info, attack_type)
             
-            # features is now (1, 95)
+            # features is (1, 95)
             shap_values = self.shap_explainer.shap_values(features.reshape(1, -1), nsamples=50, silent=True)
             
-            # Handle binary classification output shapes
-            shap_vals = shap_values[1][0] if isinstance(shap_values, list) else shap_values[0]
+            # --- FIXED ROBUST EXTRACTION (REMOVED target_array variable) ---
+            if isinstance(shap_values, list):
+                # For binary/multi-class, take positive class (index 1) or first (index 0)
+                vals_to_flatten = shap_values[1] if len(shap_values) > 1 else shap_values[0]
+                shap_vals = vals_to_flatten.flatten()
+            else:
+                shap_vals = shap_values.flatten()
             
-            # Get top contributors
-            top_features = self._get_top_features(shap_vals, features.flatten())
+            # FORCE SLICE TO 95 (Roadmap Point 2 Alignment)
+            shap_vals = shap_vals[:95] 
             
-            # Construct the Points 2 & 3 Roadmap Explanation
+            # Get top contributors using the sliced array
+            top_features = self._get_top_features(shap_vals, features.flatten()[:95])
+            
+            # Construct the Explanation Object
             explanation = {
                 "type": "HYBRID_ENSEMBLE_XAI",
                 "title": f"🚨 {attack_type.replace('_', ' ').title()} Detected",
@@ -90,8 +99,8 @@ class XAIExplainer:
                 "confidence": f"{confidence:.1%}",
                 "top_contributing_factors": top_features,
                 "sensory_analysis": {
-                    "topological_shift": "Detected" if np.abs(np.sum(shap_vals[78:94])) > 0.05 else "Stable",
-                    "visual_anomaly": "Detected" if shap_vals[94] > 0.05 else "Stable"
+                    "topological_shift": "Detected" if float(np.abs(np.sum(shap_vals[78:94]))) > 0.05 else "Stable",
+                    "visual_anomaly": "Detected" if float(shap_vals[94]) > 0.05 else "Stable"
                 },
                 "recommended_actions": self._get_recommended_actions(attack_type),
                 "timestamp": datetime.now().isoformat()
@@ -100,17 +109,22 @@ class XAIExplainer:
             
         except Exception as e:
             print(f"[!] XAI Error: {e}")
+            import traceback
+            traceback.print_exc() 
             return self._generate_fallback_explanation(features, confidence, packet_info, attack_type)
-
+    
     def _get_top_features(self, shap_values, features, top_n=5):
         contributions = []
         for i, contrib in enumerate(shap_values):
             name = self.feature_names[i] if i < len(self.feature_names) else f"Feature_{i}"
+            
+            # --- FIX: Convert contrib to a float to avoid array ambiguity ---
+            c_val = float(contrib)
             contributions.append({
                 "factor": name,
-                "impact": "Increased Risk" if contrib > 0 else "Decreased Risk",
-                "magnitude": f"{abs(contrib):.4f}",
-                "observed_value": f"{features[i]:.4f}"
+                "impact": "Increased Risk" if c_val > 0 else "Decreased Risk",
+                "magnitude": f"{abs(c_val):.4f}",
+                "observed_value": f"{float(features[i]):.4f}"
             })
         contributions.sort(key=lambda x: float(x["magnitude"]), reverse=True)
         return contributions[:top_n]

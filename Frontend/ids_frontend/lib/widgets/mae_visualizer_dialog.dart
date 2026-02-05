@@ -4,30 +4,76 @@ import '../providers/ids_provider.dart';
 class MaeVisualizerDialog extends StatelessWidget {
   final Packet packet;
 
-  MaeVisualizerDialog({required this.packet});
+  MaeVisualizerDialog({required this.packet, Key? key}) : super(key: key);
 
   @override
   Widget build(BuildContext context) {
-    // --- REAL DATA EXTRACTION (ROADMAP POINT 3) ---
-    // We attempt to extract values from the 'top_contributing_factors' or features.
-    // If the full vector isn't available, we fall back to a zeroed list.
     final explanation = packet.explanation ?? {};
     final List<dynamic> factors = explanation['top_contributing_factors'] ?? [];
 
-    // Initialize an 81-cell grid (9x9)
-    List<double> gridData = List.filled(81, 0.0);
+    // Check if the backend is still generating SHAP values (Roadmap Point 3)
+    final String processStatus = explanation['status'] ?? 'done';
 
-    // Populate grid with actual observed values from the XAI payload
-    // Note: In a production environment, you might pass the full 78-dim vector
-    // in the 'explanation' object under a 'raw_scaled' key.
+    // 1. HANDLE LOADING STATE
+    // Show spinner ONLY if the backend specifically says it's still 'analyzing'
+    if (processStatus == 'analyzing' && factors.isEmpty) {
+      return AlertDialog(
+        backgroundColor: Colors.grey[900],
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            SizedBox(height: 20),
+            CircularProgressIndicator(color: Colors.orangeAccent),
+            SizedBox(height: 24),
+            Text("AI EXPLAINER ACTIVE",
+                style: TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: 1.1)),
+            SizedBox(height: 8),
+            Text("Reconstructing 9x9 structural grid...",
+                textAlign: TextAlign.center,
+                style: TextStyle(color: Colors.white70, fontSize: 12)),
+            SizedBox(height: 20),
+          ],
+        ),
+      );
+    }
+
+    // 2. HANDLE ERROR / NO DATA STATE
+    // If it's an anomaly but factors is still empty and it's NOT analyzing, it failed.
+    if (factors.isEmpty && packet.status != 'normal') {
+      return AlertDialog(
+        backgroundColor: Colors.grey[900],
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+        title: Text("VISUAL DATA UNAVAILABLE",
+            style: TextStyle(
+                color: Colors.redAccent,
+                fontSize: 16,
+                fontWeight: FontWeight.bold)),
+        content: Text(
+            "The XAI worker encountered an error (IndexError) or the background data is still being summarized.",
+            style: TextStyle(color: Colors.white70, fontSize: 13)),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text("CLOSE", style: TextStyle(color: Colors.white38)),
+          )
+        ],
+      );
+    }
+
+    // 3. PREPARE GRID DATA (Populate from available features)
+    List<double> gridData = List.filled(81, 0.0);
     if (factors.isNotEmpty) {
       for (int i = 0; i < factors.length; i++) {
         if (i < 81) {
-          // Extract the magnitude of the feature's impact
+          // Extract normalized observed values from the SHAP payload
           double val = double.tryParse(
                   factors[i]['observed_value']?.toString() ?? '0.0') ??
               0.0;
-          gridData[i] = val.clamp(0.0, 1.0); // Normalize for heat-map coloring
+          gridData[i] = val.clamp(0.0, 1.0);
         }
       }
     }
@@ -51,7 +97,7 @@ class MaeVisualizerDialog extends StatelessWidget {
       content: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          // The Visual Reconstruction Grid
+          // The Visual Reconstruction Grid (SAFE Paper Implementation)
           Container(
             width: 220,
             height: 220,
@@ -72,7 +118,6 @@ class MaeVisualizerDialog extends StatelessWidget {
                 double val = gridData[index];
                 return Container(
                   decoration: BoxDecoration(
-                    // Lighter blue for low values, bright cyan/magenta for high values
                     color: Color.lerp(
                         Colors.blueGrey[900],
                         packet.status == 'normal'
@@ -87,7 +132,7 @@ class MaeVisualizerDialog extends StatelessWidget {
           ),
           SizedBox(height: 24),
 
-          // Technical Insights
+          // Technical Insights (Point 3 Dashboard Context)
           _buildMetricRow("Reconstruction Error",
               "${packet.maeAnomaly.toStringAsFixed(5)}"),
           _buildMetricRow("Anomalous Index",
@@ -96,7 +141,7 @@ class MaeVisualizerDialog extends StatelessWidget {
 
           SizedBox(height: 12),
           Text(
-            "High intensity cells represent features contributing most to the anomaly detection.",
+            "High intensity cells represent features contributing most to the structural anomaly.",
             textAlign: TextAlign.center,
             style: TextStyle(
                 color: Colors.white24,

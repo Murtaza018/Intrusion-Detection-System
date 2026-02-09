@@ -35,7 +35,6 @@ class Packet {
     this.userLabel,
   });
 
-  // Roadmap Point 3 Getters
   double get maeAnomaly => explanation?['mae_anomaly'] ?? 0.0;
   double get gnnAnomaly => explanation?['gnn_anomaly'] ?? 0.0;
 }
@@ -48,18 +47,21 @@ class IdsProvider with ChangeNotifier {
   int _attackCount = 0;
   int _zeroDayCount = 0;
   Timer? _packetTimer;
-  Timer? _sensoryTimer; // High-speed loop for Gauges
+  Timer? _sensoryTimer;
   Set<int> _processedPacketIds = {};
 
-  String _currentFilter = 'all';
+  // --- NEW: SOC-GRADE MULTI-FILTER STATE ---
+  Map<String, dynamic> _activeFilters = {
+    'status': 'all', // 'all', 'normal', 'known_attack', 'zero_day'
+    'search': '', // Matches IP or Protocol
+  };
+
   bool _isLoadingMore = false;
 
-  // --- NEW: LIVE SENSORY STATE (ROADMAP POINT 3) ---
   double _liveGnnAnomaly = 0.0;
   double _liveMaeAnomaly = 0.0;
   String _liveStatus = 'unknown';
 
-  // --- ADAPTATION QUEUES (RESTORED) ---
   final Set<int> _selectedPacketIds = {};
   final List<Packet> _ganQueue = [];
   final List<Packet> _jitterQueue = [];
@@ -69,14 +71,12 @@ class IdsProvider with ChangeNotifier {
   bool _consistencyChecked = false;
   bool _consistencyPassed = false;
 
-  // Getters
+  // Basic Getters
   bool get isRunning => _isRunning;
-  List<Packet> get packets => _packets;
   int get totalPackets => _totalPackets;
   int get normalCount => _normalCount;
   int get attackCount => _attackCount;
   int get zeroDayCount => _zeroDayCount;
-  String get currentFilter => _currentFilter;
   bool get isLoadingMore => _isLoadingMore;
 
   // Sensory Getters
@@ -84,12 +84,29 @@ class IdsProvider with ChangeNotifier {
   double get liveMaeAnomaly => _liveMaeAnomaly;
   String get liveStatus => _liveStatus;
 
+  // Filter Getters
+  String get currentFilter => _activeFilters['status'];
+  Map<String, dynamic> get activeFilters => _activeFilters;
+
+  // --- REWRITTEN: MULTI-FILTER LOGIC (IP, Protocol, Status) ---
   List<Packet> get filteredPackets {
-    if (_currentFilter == 'all') return _packets;
-    return _packets.where((packet) => packet.status == _currentFilter).toList();
+    return _packets.where((p) {
+      // 1. Status Check (Normal/Attack/ZeroDay)
+      bool matchesStatus = _activeFilters['status'] == 'all' ||
+          p.status == _activeFilters['status'];
+
+      // 2. Search Check (IPs or Protocol)
+      String query = _activeFilters['search'].toLowerCase();
+      bool matchesSearch = query.isEmpty ||
+          p.srcIp.contains(query) ||
+          p.dstIp.contains(query) ||
+          p.protocol.toLowerCase().contains(query);
+
+      return matchesStatus && matchesSearch;
+    }).toList();
   }
 
-  // Queue & Label Getters
+  // Selection Getters
   List<Packet> get ganQueue => _ganQueue;
   List<Packet> get jitterQueue => _jitterQueue;
   int get totalSelected => _ganQueue.length + _jitterQueue.length;
@@ -103,7 +120,24 @@ class IdsProvider with ChangeNotifier {
     'X-API-Key': 'MySuperSecretKey12345!'
   };
 
-  // --- SELECTION & BATCH LOGIC (RESTORED) ---
+  // --- FILTER & SEARCH SETTERS ---
+  void setFilter(String statusFilter) {
+    _activeFilters['status'] = statusFilter;
+    // We don't clear packets anymore, just filter the view for a smoother experience
+    notifyListeners();
+  }
+
+  void updateSearchQuery(String query) {
+    _activeFilters['search'] = query;
+    notifyListeners();
+  }
+
+  void clearAllFilters() {
+    _activeFilters = {'status': 'all', 'search': ''};
+    notifyListeners();
+  }
+
+  // --- SELECTION LOGIC ---
   bool isSelected(int packetId) => _selectedPacketIds.contains(packetId);
 
   void toggleSelection(Packet packet, String queueType) {
@@ -122,14 +156,8 @@ class IdsProvider with ChangeNotifier {
     notifyListeners();
   }
 
-  void clearQueues() {
-    _selectedPacketIds.clear();
-    _ganQueue.clear();
-    _jitterQueue.clear();
-    _batchLabel = null;
-    _consistencyChecked = false;
-    notifyListeners();
-  }
+  List<String> _existingLabels = [];
+  List<String> get existingLabels => _existingLabels;
 
   void setBatchLabel(String? label, bool isNew) {
     _batchLabel = label;
@@ -139,19 +167,100 @@ class IdsProvider with ChangeNotifier {
     notifyListeners();
   }
 
+  // Ensure these are also present if not already:
   void setConsistencyStatus(bool checked, bool passed) {
     _consistencyChecked = checked;
     _consistencyPassed = passed;
     notifyListeners();
   }
 
-  void setFilter(String filter) {
-    if (_currentFilter != filter) {
-      _currentFilter = filter;
-      _packets = [];
-      _processedPacketIds.clear();
+  void clearQueues() {
+    _selectedPacketIds.clear();
+    _ganQueue.clear();
+    _jitterQueue.clear();
+    _batchLabel = null;
+    _consistencyChecked = false;
+    _consistencyPassed = false;
+    notifyListeners();
+  }
+
+  /// Sends the selected packets and target labels to the backend /api/retrain endpoint.
+  Future<bool> sendRetrainRequest() async {
+    // Safety check: Don't allow empty training runs
+    if (_ganQueue.isEmpty || _batchLabel == null) return false;
+
+    try {
+      final body = {
+        "gan_queue": _ganQueue
+            .map((p) => {"id": p.id, "status": p.status, "summary": p.summary})
+            .toList(),
+        "jitter_queue": _jitterQueue
+            .map((p) => {"id": p.id, "status": p.status, "summary": p.summary})
+            .toList(),
+        "target_label": _batchLabel,
+        "is_new_label":
+            _isNewAttack // Correctly flags WGAN to create a new neuron
+      };
+
+      final response = await http.post(
+        Uri.parse('$BASE_URL/api/retrain'),
+        headers: {...HEADERS, 'Content-Type': 'application/json'},
+        body: jsonEncode(body),
+      );
+
+      return response.statusCode == 200;
+    } catch (e) {
+      debugPrint("Retrain Request Failed: $e");
+      return false;
+    }
+  }
+
+  Future<Map<String, dynamic>> analyzeQueues() async {
+    // Return empty result if nothing to analyze
+    if (_ganQueue.isEmpty && _jitterQueue.isEmpty) return {};
+
+    try {
+      final body = {
+        "gan_queue": _ganQueue.map((p) => {"id": p.id}).toList(),
+        "jitter_queue": _jitterQueue.map((p) => {"id": p.id}).toList(),
+      };
+
+      final response = await http.post(
+        Uri.parse('$BASE_URL/api/analyze_selection'),
+        headers: {
+          ...HEADERS,
+          'Content-Type': 'application/json',
+        },
+        body: jsonEncode(body),
+      );
+
+      if (response.statusCode == 200) {
+        final result = jsonDecode(response.body);
+        // Result typically contains: {"passed": true/false, "variance": 0.045}
+        return result;
+      }
+    } catch (e) {
+      debugPrint("Analysis error: $e");
+    }
+
+    // Fallback if backend is unreachable or errors out
+    return {"passed": false, "error": "Backend unreachable"};
+  }
+
+  // This fetches the labels used by your backend label_encoder.pkl
+  Future<void> fetchLabels() async {
+    try {
+      final response =
+          await http.get(Uri.parse('$BASE_URL/api/labels'), headers: HEADERS);
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        _existingLabels = List<String>.from(data['labels']);
+        notifyListeners();
+      }
+    } catch (e) {
+      debugPrint("Label fetch error: $e");
+      _existingLabels = ["BENIGN", "DDoS", "PortScan", "Bot", "Infiltration"];
       notifyListeners();
-      _fetchRecentPackets();
     }
   }
 
@@ -187,7 +296,7 @@ class IdsProvider with ChangeNotifier {
     _packetTimer?.cancel();
     _sensoryTimer?.cancel();
 
-    _packetTimer = Timer.periodic(Duration(seconds: 2), (timer) {
+    _packetTimer = Timer.periodic(const Duration(seconds: 2), (timer) {
       if (!_isRunning) {
         timer.cancel();
         return;
@@ -196,7 +305,7 @@ class IdsProvider with ChangeNotifier {
       _fetchStatsFromBackend();
     });
 
-    _sensoryTimer = Timer.periodic(Duration(milliseconds: 500), (timer) {
+    _sensoryTimer = Timer.periodic(const Duration(milliseconds: 500), (timer) {
       if (!_isRunning) {
         timer.cancel();
         return;
@@ -205,7 +314,7 @@ class IdsProvider with ChangeNotifier {
     });
   }
 
-  // --- API CALLS (RESTORED & ENHANCED) ---
+  // --- CORE API CALLS ---
   Future<void> _fetchLiveSensoryData() async {
     try {
       final response = await http.get(Uri.parse('$BASE_URL/api/sensory/live'),
@@ -224,8 +333,9 @@ class IdsProvider with ChangeNotifier {
 
   Future<void> _fetchRecentPackets() async {
     try {
+      // We fetch all types during polling to keep counts accurate,
+      // but the UI getter handles the filtering.
       String url = '$BASE_URL/api/packets/recent?limit=100';
-      if (_currentFilter != 'all') url += '&status=$_currentFilter';
       final response = await http.get(Uri.parse(url), headers: HEADERS);
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
@@ -238,37 +348,26 @@ class IdsProvider with ChangeNotifier {
     }
   }
 
-// --- PAGINATION LOGIC (LOAD OLDER PACKETS) ---
   Future<void> loadMorePackets() async {
     if (_isLoadingMore) return;
     _isLoadingMore = true;
     notifyListeners();
-
     try {
-      // Offset is based on current list length to fetch the next batch
-      int currentCount = _packets.length;
-      String url = '$BASE_URL/api/packets/recent?limit=50&offset=$currentCount';
-
-      if (_currentFilter != 'all') url += '&status=$_currentFilter';
-
+      int offset = _packets.length;
+      String url = '$BASE_URL/api/packets/recent?limit=50&offset=$offset';
       final response = await http.get(Uri.parse(url), headers: HEADERS);
-
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
-        final List<dynamic> fetchedPackets = data['packets'];
-
-        for (var packetData in fetchedPackets) {
-          final int packetId = packetData['id'];
-          // Only add if we haven't seen it before
-          if (!_processedPacketIds.contains(packetId)) {
-            // .add() appends to the END of the list (older data)
+        for (var packetData in data['packets']) {
+          final int id = packetData['id'];
+          if (!_processedPacketIds.contains(id)) {
             _packets.add(_mapDataToPacket(packetData));
-            _processedPacketIds.add(packetId);
+            _processedPacketIds.add(id);
           }
         }
       }
     } catch (e) {
-      debugPrint('Error loading more packets: $e');
+      debugPrint('Pagination error: $e');
     } finally {
       _isLoadingMore = false;
       notifyListeners();
@@ -311,46 +410,16 @@ class IdsProvider with ChangeNotifier {
     );
   }
 
-// --- LABEL MANAGEMENT (FOR ADAPTATION SCREEN) ---
-  List<String> _existingLabels = [];
-  List<String> get existingLabels => _existingLabels;
-
-  Future<void> fetchLabels() async {
-    try {
-      final response =
-          await http.get(Uri.parse('$BASE_URL/api/labels'), headers: HEADERS);
-
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-        // Extract the list of labels from the backend's label_encoder.pkl
-        _existingLabels = List<String>.from(data['labels']);
-        notifyListeners();
-      }
-    } catch (e) {
-      debugPrint("Error fetching labels from backend: $e");
-      // Fallback labels so the UI doesn't break if the backend is down
-      _existingLabels = [
-        "BENIGN",
-        "DDoS",
-        "PortScan",
-        "Bot",
-        "Infiltration",
-        "Web Attack"
-      ];
-      notifyListeners();
-    }
-  }
-
   Future<void> _fetchStatsFromBackend() async {
     try {
       final response =
           await http.get(Uri.parse('$BASE_URL/api/stats'), headers: HEADERS);
       if (response.statusCode == 200) {
-        final statsData = jsonDecode(response.body);
-        _totalPackets = statsData['total_packets'] ?? _totalPackets;
-        _normalCount = statsData['normal_count'] ?? _normalCount;
-        _attackCount = statsData['attack_count'] ?? _attackCount;
-        _zeroDayCount = statsData['zero_day_count'] ?? _zeroDayCount;
+        final stats = jsonDecode(response.body);
+        _totalPackets = stats['total_packets'] ?? _totalPackets;
+        _normalCount = stats['normal_count'] ?? _normalCount;
+        _attackCount = stats['attack_count'] ?? _attackCount;
+        _zeroDayCount = stats['zero_day_count'] ?? _zeroDayCount;
         notifyListeners();
       }
     } catch (e) {
@@ -358,65 +427,28 @@ class IdsProvider with ChangeNotifier {
     }
   }
 
-  Future<bool> sendRetrainRequest() async {
-    if (_ganQueue.isEmpty || _batchLabel == null) return false;
-    try {
-      final body = {
-        "gan_queue": _ganQueue
-            .map((p) => {"id": p.id, "status": p.status, "summary": p.summary})
-            .toList(),
-        "jitter_queue": _jitterQueue
-            .map((p) => {"id": p.id, "status": p.status, "summary": p.summary})
-            .toList(),
-        "target_label": _batchLabel,
-        "is_new_label": _isNewAttack
-      };
-      final response = await http.post(Uri.parse('$BASE_URL/api/retrain'),
-          headers: {...HEADERS, 'Content-Type': 'application/json'},
-          body: jsonEncode(body));
-      return response.statusCode == 200;
-    } catch (e) {
-      return false;
-    }
-  }
-
-  Future<Map<String, dynamic>> analyzeQueues() async {
-    try {
-      final body = {
-        "gan_queue": _ganQueue.map((p) => {"id": p.id}).toList(),
-        "jitter_queue": _jitterQueue.map((p) => {"id": p.id}).toList(),
-      };
-      final response = await http.post(
-          Uri.parse('$BASE_URL/api/analyze_selection'),
-          headers: {...HEADERS, 'Content-Type': 'application/json'},
-          body: jsonEncode(body));
-      if (response.statusCode == 200) return jsonDecode(response.body);
-    } catch (e) {
-      debugPrint("Analysis error: $e");
-    }
-    return {};
-  }
-
   void addZeroDayPacket() {
+    final id = DateTime.now().millisecondsSinceEpoch;
     final packet = Packet(
-        id: DateTime.now().millisecondsSinceEpoch,
-        summary: 'UDP 192.168.1.99:12345 → 10.0.0.1:53',
+        id: id,
+        summary: 'INJECTED_NOVELTY_DATA',
         srcIp: '192.168.1.99',
         dstIp: '10.0.0.1',
-        protocol: 'UDP',
-        srcPort: 12345,
-        dstPort: 53,
-        length: 512,
+        protocol: 'TCP',
+        srcPort: 443,
+        dstPort: 443,
+        length: 1024,
         timestamp: DateTime.now(),
         status: 'zero_day',
-        confidence: 0.92,
+        confidence: 0.95,
         explanation: {
-          'type': 'Zero-Day Anomaly',
-          'mae_anomaly': 0.85,
-          'gnn_anomaly': 0.42
+          'description': 'Simulated anomaly for structural verification.',
+          'mae_anomaly': 0.88,
+          'gnn_anomaly': 0.15,
+          'status': 'done'
         });
     _packets.insert(0, packet);
-    _processedPacketIds.add(packet.id);
+    _processedPacketIds.add(id);
     notifyListeners();
   }
 }

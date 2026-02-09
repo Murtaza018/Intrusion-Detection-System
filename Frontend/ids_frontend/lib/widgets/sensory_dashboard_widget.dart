@@ -4,50 +4,54 @@ import 'package:syncfusion_flutter_gauges/gauges.dart';
 import '../providers/ids_provider.dart';
 
 class SensoryDashboard extends StatelessWidget {
+  const SensoryDashboard({Key? key}) : super(key: key);
+
   @override
   Widget build(BuildContext context) {
     final idsProvider = Provider.of<IdsProvider>(context);
 
     return Container(
-      padding: EdgeInsets.all(16),
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       decoration: BoxDecoration(
-        color: Colors.grey[900],
-        borderRadius: BorderRadius.circular(15),
+        color: const Color(0xFF0D1117),
+        borderRadius: BorderRadius.circular(4),
+        border: Border.all(color: Colors.white.withOpacity(0.05)),
       ),
       child: Column(
+        mainAxisSize: MainAxisSize.min, // Prevents expanding vertically
         children: [
           Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text("SENSORY ENGINES",
+              const Icon(Icons.hub_outlined,
+                  color: Color(0xFF00E5FF), size: 12),
+              const SizedBox(width: 8),
+              const Text("HYBRID SENSORY ENGINES",
                   style: TextStyle(
-                      color: Colors.white,
+                      color: Colors.white30,
+                      fontSize: 9,
                       fontWeight: FontWeight.bold,
                       letterSpacing: 1.2)),
-              _buildStatusIndicator(idsProvider.liveStatus),
+              const Spacer(),
+              _buildLiveIndicator(idsProvider.liveStatus),
             ],
           ),
-          SizedBox(height: 20),
+          const SizedBox(height: 8),
+          // FIX: Use a Row with Flexible to prevent overflow
           Row(
+            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
             children: [
-              // GNN Gauge (Topological)
-              Expanded(
-                child: _buildSensorGauge(
-                  title: "GNN CONTEXT",
-                  subtitle: "Topological Shift",
-                  value: idsProvider.liveGnnAnomaly,
-                  color: Colors.cyanAccent,
-                ),
-              ),
-              // MAE Gauge (Structural)
-              Expanded(
-                child: _buildSensorGauge(
-                  title: "MAE VISUAL",
-                  subtitle: "Structure Error",
-                  value: idsProvider.liveMaeAnomaly,
-                  color: Colors.pinkAccent,
-                ),
-              ),
+              Flexible(
+                  child: _buildSensorGauge("GNN CONTEXT", "Topological Shift",
+                      idsProvider.liveGnnAnomaly, const Color(0xFF00E5FF))),
+              Container(
+                  width: 1,
+                  height: 40,
+                  color: Colors.white.withOpacity(0.05),
+                  margin: const EdgeInsets.symmetric(horizontal: 10)),
+              Flexible(
+                  child: _buildSensorGauge("MAE VISUAL", "Structure Error",
+                      idsProvider.liveMaeAnomaly, Colors.pinkAccent)),
             ],
           ),
         ],
@@ -56,22 +60,14 @@ class SensoryDashboard extends StatelessWidget {
   }
 
   Widget _buildSensorGauge(
-      {required String title,
-      required String subtitle,
-      required double value,
-      required Color color}) {
-    // Value mapping: normalize sensory scores for the gauge 0-1.0
+      String title, String subtitle, double value, Color color) {
     double displayValue = (value * 100).clamp(0, 100);
-
     return Column(
+      mainAxisSize: MainAxisSize.min,
       children: [
-        Text(title,
-            style: TextStyle(
-                color: Colors.white70,
-                fontSize: 12,
-                fontWeight: FontWeight.bold)),
-        Container(
-          height: 140,
+        SizedBox(
+          height: 70, // Reduced height to fit dashboard
+          width: 120,
           child: SfRadialGauge(
             axes: <RadialAxis>[
               RadialAxis(
@@ -81,37 +77,33 @@ class SensoryDashboard extends StatelessWidget {
                 showTicks: false,
                 startAngle: 180,
                 endAngle: 0,
-                radiusFactor: 0.8,
-                canScaleToFit: true,
+                radiusFactor: 0.9,
                 axisLineStyle: AxisLineStyle(
-                  thickness: 0.2,
-                  color: Colors.white10,
-                  thicknessUnit: GaugeSizeUnit.factor,
-                ),
+                    thickness: 0.15,
+                    color: Colors.white.withOpacity(0.05),
+                    thicknessUnit: GaugeSizeUnit.factor),
                 pointers: <GaugePointer>[
                   RangePointer(
-                    value: displayValue,
-                    width: 0.2,
-                    sizeUnit: GaugeSizeUnit.factor,
-                    color: color,
-                    enableAnimation: true,
-                    animationDuration: 1000,
-                  ),
+                      value: displayValue,
+                      width: 0.15,
+                      sizeUnit: GaugeSizeUnit.factor,
+                      color: color,
+                      enableAnimation: true),
                   MarkerPointer(
-                    value: displayValue,
-                    markerType: MarkerType.circle,
-                    color: Colors.white,
-                    markerHeight: 10,
-                    markerWidth: 10,
-                  )
+                      value: displayValue,
+                      markerType: MarkerType.invertedTriangle,
+                      color: Colors.white,
+                      markerHeight: 4,
+                      markerWidth: 4)
                 ],
                 annotations: <GaugeAnnotation>[
                   GaugeAnnotation(
                     widget: Text("${displayValue.toStringAsFixed(1)}%",
                         style: TextStyle(
-                            fontSize: 14,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.white)),
+                            fontSize: 10,
+                            fontWeight: FontWeight.w900,
+                            color: color,
+                            fontFamily: 'monospace')),
                     angle: 90,
                     positionFactor: 0.5,
                   )
@@ -120,23 +112,37 @@ class SensoryDashboard extends StatelessWidget {
             ],
           ),
         ),
-        Text(subtitle, style: TextStyle(color: Colors.white38, fontSize: 10)),
+        Text(title,
+            style: const TextStyle(
+                color: Colors.white70,
+                fontSize: 8,
+                fontWeight: FontWeight.bold)),
+        const SizedBox(height: 2),
+        Text(subtitle,
+            style: const TextStyle(color: Colors.white10, fontSize: 7)),
       ],
     );
   }
 
-  Widget _buildStatusIndicator(String status) {
+  Widget _buildLiveIndicator(String status) {
     Color color = status == 'normal'
-        ? Colors.green
-        : (status == 'known_attack' ? Colors.orange : Colors.red);
-    return Container(
-      padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(
-          color: color.withOpacity(0.2),
-          borderRadius: BorderRadius.circular(5)),
-      child: Text(status.toUpperCase(),
-          style: TextStyle(
-              color: color, fontSize: 10, fontWeight: FontWeight.bold)),
+        ? Colors.greenAccent
+        : (status == 'known_attack' ? Colors.orangeAccent : Colors.redAccent);
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+            width: 4,
+            height: 4,
+            decoration: BoxDecoration(color: color, shape: BoxShape.circle)),
+        const SizedBox(width: 6),
+        Text(status.toUpperCase(),
+            style: TextStyle(
+                color: color.withOpacity(0.7),
+                fontSize: 8,
+                fontWeight: FontWeight.bold,
+                letterSpacing: 1)),
+      ],
     );
   }
 }

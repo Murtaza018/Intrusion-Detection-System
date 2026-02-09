@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/ids_provider.dart';
 import 'packet_detail_dialog.dart';
-import 'mae_visualizer_dialog.dart'; // Import the new dialog
+import 'mae_visualizer_dialog.dart';
 
 class PacketList extends StatelessWidget {
   @override
@@ -15,25 +15,29 @@ class PacketList extends StatelessWidget {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(Icons.lan, size: 64, color: Colors.grey[300]),
-            SizedBox(height: 16),
-            Text('No packets found', style: TextStyle(color: Colors.grey[500])),
+            Icon(Icons.radar, size: 40, color: Colors.white10),
+            const SizedBox(height: 16),
+            const Text('SCANNING NETWORK INTERFACE...',
+                style: TextStyle(
+                    color: Colors.white24, letterSpacing: 2, fontSize: 10)),
           ],
         ),
       );
     }
 
     return ListView.builder(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       itemCount: packets.length + 1,
       itemBuilder: (context, index) {
         if (index == packets.length) {
           return Padding(
-            padding: EdgeInsets.all(16.0),
+            padding: const EdgeInsets.all(24.0),
             child: provider.isLoadingMore
-                ? Center(child: CircularProgressIndicator())
+                ? const Center(child: CircularProgressIndicator(strokeWidth: 2))
                 : TextButton(
                     onPressed: () => provider.loadMorePackets(),
-                    child: Text("Load Older Packets")),
+                    child: const Text("FETCH OLDER SEQUENCES",
+                        style: TextStyle(fontSize: 10, color: Colors.white30))),
           );
         }
         return PacketListItem(packet: packets[index]);
@@ -44,7 +48,6 @@ class PacketList extends StatelessWidget {
 
 class PacketListItem extends StatelessWidget {
   final Packet packet;
-
   const PacketListItem({required this.packet});
 
   @override
@@ -53,76 +56,65 @@ class PacketListItem extends StatelessWidget {
     bool isSelected = provider.isSelected(packet.id);
 
     Color statusColor;
-    IconData statusIcon;
-    String statusText;
-
+    String tag;
     switch (packet.status) {
       case 'known_attack':
-        statusColor = Colors.red;
-        statusIcon = Icons.warning;
-        statusText = 'ATTACK';
+        statusColor = const Color(0xFFFF5252);
+        tag = "CRIT";
         break;
       case 'zero_day':
-        statusColor = Colors.orange;
-        statusIcon = Icons.new_releases;
-        statusText = 'ZERO-DAY';
+        statusColor = Colors.orangeAccent;
+        tag = "WARN";
         break;
       default:
-        statusColor = Colors.green;
-        statusIcon = Icons.check_circle;
-        statusText = 'NORMAL';
+        statusColor = Colors.greenAccent;
+        tag = "INFO";
     }
 
-    return Card(
-      elevation: isSelected ? 4 : 1,
-      color: isSelected ? Colors.deepPurple.shade50 : Colors.white,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
-        side: isSelected
-            ? BorderSide(color: Colors.deepPurple, width: 2)
-            : BorderSide.none,
-      ),
-      margin: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      child: ListTile(
-        leading: Icon(statusIcon, color: statusColor),
-        title: Text(packet.summary,
-            style: TextStyle(fontWeight: FontWeight.w500, fontSize: 13)),
-        subtitle: Text('${packet.srcIp} → ${packet.dstIp} • ${packet.protocol}',
-            style: TextStyle(fontSize: 11)),
-
-        // --- UPDATED TRAILING SECTION (ROADMAP POINT 3) ---
-        trailing: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            // Only show visualizer for anomalies or zero-days
-            if (packet.status == 'zero_day' || packet.maeAnomaly > 0.1)
-              IconButton(
-                icon: Icon(Icons.grid_view_rounded,
-                    color: Colors.orangeAccent, size: 20),
-                tooltip: 'View MAE Structure',
-                onPressed: () => showDialog(
-                  context: context,
-                  builder: (_) => MaeVisualizerDialog(packet: packet),
-                ),
-              ),
-
-            // Status Chip
-            Chip(
-              label: Text(statusText,
-                  style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 9,
-                      fontWeight: FontWeight.bold)),
-              backgroundColor: statusColor,
-              padding: EdgeInsets.zero,
-              visualDensity: VisualDensity.compact,
-            ),
-          ],
+    return GestureDetector(
+      onTap: () => showDialog(
+          context: context, builder: (_) => PacketDetailDialog(packet: packet)),
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 6),
+        decoration: BoxDecoration(
+          color: isSelected ? const Color(0xFF232931) : const Color(0xFF15191C),
+          border: Border(left: BorderSide(color: statusColor, width: 3)),
         ),
-
-        onTap: () => showDialog(
-            context: context,
-            builder: (_) => PacketDetailDialog(packet: packet)),
+        child: ListTile(
+          dense: true,
+          visualDensity: VisualDensity.compact,
+          title: Text(packet.summary,
+              style: const TextStyle(
+                  fontFamily: 'monospace',
+                  fontSize: 12,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white)),
+          subtitle: Text(
+              "${packet.srcIp} -> ${packet.dstIp} | ${packet.protocol} | ${packet.length}B",
+              style: const TextStyle(
+                  color: Colors.white38,
+                  fontSize: 10,
+                  fontFamily: 'monospace')),
+          trailing: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (packet.status == 'zero_day' || packet.maeAnomaly > 0.1)
+                IconButton(
+                  icon: const Icon(Icons.grid_3x3,
+                      color: Colors.orangeAccent, size: 16),
+                  onPressed: () => showDialog(
+                      context: context,
+                      builder: (_) => MaeVisualizerDialog(packet: packet)),
+                ),
+              Text(tag,
+                  style: TextStyle(
+                      color: statusColor,
+                      fontWeight: FontWeight.w900,
+                      fontSize: 9,
+                      fontFamily: 'monospace')),
+            ],
+          ),
+        ),
       ),
     );
   }

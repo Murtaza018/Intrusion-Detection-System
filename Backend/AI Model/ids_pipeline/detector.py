@@ -26,51 +26,53 @@ class Detector:
         self.packet_storage = packet_storage
         
         self.packet_queue = queue.Queue()
-        self.xai_queue = queue.Queue(maxsize=5)
+        self.xai_queue = queue.Queue(maxsize=50)
         
         self.running = False
         self.thread = None
         self.xai_thread = None
         
     def start(self):
-        """Start detection threads and RESUME unfinished XAI tasks"""
+        """Start detection threads and RESUME unfinished XAI tasks with full metadata"""
         self.packet_queue = queue.Queue()
-        self.xai_queue = queue.Queue(maxsize=10) # Increased queue size
+        self.xai_queue = queue.Queue(maxsize=50)
         self.running = True
         
-        # --- NEW: PERSISTENCE RESUME LOGIC (POINT 3) ---
         print("[*] Priming XAI background from database...")
-        # Get last 50 normal packets to immediately initialize SHAP
+        # Prime SHAP background
         past_normal = self.packet_storage.get_packets(limit=50, status_filter='normal')
         for p_dict in past_normal:
-            # We need the raw features stored in the DB
             feat_list = self.packet_storage.get_features_for_training([p_dict['id']])
             if feat_list:
                 self.feature_extractor.update_minmax(feat_list[0])
 
-        # Find packets that were cut off (stuck in 'analyzing' status)
+        # Find packets stuck in 'analyzing'
         unfinished = self.packet_storage.get_packets(limit=10, status_filter='analyzing')
         for p_dict in unfinished:
-            # Re-queue them for the worker to finish
             print(f"[+] Resuming XAI analysis for Packet ID: {p_dict['id']}")
-            # Note: We fetch the features separately as get_packets doesn't include them
             raw_feats = self.packet_storage.get_features_for_training([p_dict['id']])
+            
             if raw_feats:
-                # Reconstruct enhanced features for the XGBoost explainer
                 scaled_78 = self.feature_extractor.scale_features(raw_feats[0])
-                # We use zeros for GNN/MAE padding during resume to avoid re-calculating graph
                 enhanced = np.hstack([scaled_78, np.zeros((1, 17))]) 
                 
+                # --- FIX: Pass the EXISTING metadata from p_dict ---
                 self.xai_queue.put({
                     "packet_id": p_dict['id'], 
-                    "packet": None, # Packet object not needed for re-analysis
+                    "packet": None,
                     "features": enhanced,
                     "confidence": p_dict.get('confidence', 0.5),
-                    "packet_info": {"src_ip": p_dict['src_ip'], "dst_ip": p_dict['dst_ip']},
+                    # RE-INSERTING IP/PORT DATA FROM THE DB FETCH
+                    "packet_info": {
+                        "src_ip": p_dict.get('src_ip', ''), 
+                        "dst_ip": p_dict.get('dst_ip', ''),
+                        "protocol": p_dict.get('protocol', 'OTHER'),
+                        "src_port": p_dict.get('src_port', 0),
+                        "dst_port": p_dict.get('dst_port', 0)
+                    },
                     "status": p_dict['status'],
                     "attack_type": "zero_day" if p_dict['status'] == 'zero_day' else "Attack"
                 })
-        # -----------------------------------------------
 
         self.xai_thread = threading.Thread(target=self._xai_worker, daemon=True, name="XAI_Worker")
         self.xai_thread.start()
@@ -78,8 +80,8 @@ class Detector:
         self.thread = threading.Thread(target=self._detection_worker, daemon=True, name="Detection_Worker")
         self.thread.start()
         
-        print("[*] Hybrid Detection System Started (XAI Resumed)")
-    
+        print("[*] Hybrid Detection System Started (Metadata Preserved)")
+
     def stop(self):
         """Stop detection threads safely"""
         self.running = False
@@ -197,7 +199,10 @@ class Detector:
                 traceback.print_exc()
 
     def _xai_worker(self):
-        """SHAP XAI worker thread with enhanced robustness"""
+        """
+        SHAP XAI worker thread with Metadata Preservation.
+        Uses specialized database updates to ensure network info is not overwritten.
+        """
         print("[*] XAI worker started")
         target_model = self.model_loader.get_xgb_model()
         
@@ -206,52 +211,70 @@ class Detector:
                 task = self.xai_queue.get(timeout=1)
                 if task is None: break
                 
-                # Check initialization using primed DB data
+                # 1. SHAP INITIALIZATION (Roadmap Point 3)
+                # Build background context if not already initialized
                 if not self.xai_explainer.initialized:
-                    bg_samples = self.feature_extractor.get_background_samples()
-                    if len(bg_samples) >= BACKGROUND_SUMMARY_SIZE:
+                    bg_samples_unscaled = self.feature_extractor.get_background_samples()
+                    if len(bg_samples_unscaled) >= BACKGROUND_SUMMARY_SIZE:
                         with self.xai_explainer.lock:
                             self.xai_explainer.background_data.clear()
-                            for s in bg_samples:
-                                scaled = self.feature_extractor.scale_features(s)
-                                enhanced_bg = np.hstack([scaled, np.zeros((1, 17))])
+                            for sample in bg_samples_unscaled:
+                                scaled_78 = self.feature_extractor.scale_features(sample)
+                                # Pad to 95 dimensions for the Hybrid Ensemble Explainer
+                                enhanced_bg = np.hstack([scaled_78, np.zeros((1, 17))]) 
                                 self.xai_explainer.background_data.append(enhanced_bg.flatten())
                         
-                        self.xai_explainer.initialize_shap(target_model.predict_proba)
+                        self.xai_explainer.initialize_shap(
+                            target_model.predict_proba, 
+                            num_samples=BACKGROUND_SUMMARY_SIZE
+                        )
 
-                # Generate and SAVE to database
+                # 2. GENERATE EXPLANATION
+                # Generate robust SHAP-based factors for the 95-feature vector
                 explanation = self.xai_explainer.generate_explanation(
-                    features=task['features'],
+                    features=task['features'], # The 95-dim enhanced vector
                     model_predict_func=target_model.predict_proba,
                     confidence=task['confidence'],
                     packet_info=task['packet_info'],
                     attack_type=task['attack_type']
                 )
                 
-                # Mark as 'done' so Flutter knows to stop showing the spinner
+                # Mark as 'done' so Flutter stops showing the loading spinner
                 explanation['status'] = 'done'
-                if 'extra_metrics' in task: explanation.update(task['extra_metrics'])
+                
+                # Merge GNN and MAE scores into the explanation for the visual gauges
+                if 'extra_metrics' in task: 
+                    explanation.update(task['extra_metrics'])
 
-                # Update the existing packet in the DB with the full explanation
-                # We use a dummy packet object just to pass the ID and explanation
-                from packet_storage import Packet as PObj
-                update_obj = PObj(
-                    id=task['packet_id'], summary="", src_ip="", dst_ip="", protocol="",
-                    src_port=0, dst_port=0, length=0, timestamp=datetime.now(),
-                    status=task['status'], confidence=task['confidence'], 
-                    explanation=explanation, features=None # features=None triggers 'Case B' update
+                # 3. THE CRITICAL FIX: METADATA PRESERVATION
+                # Call the specialized update method that ONLY touches status/expl columns.
+                # This ensures src_ip, dst_ip, and protocol are NEVER modified here.
+                self.packet_storage.update_packet_xai_results(
+                    packet_id=task['packet_id'],
+                    explanation=explanation,
+                    status=task['status'],
+                    confidence=task['confidence']
                 )
-                self.packet_storage.add_packet(update_obj)
+                
                 self.xai_queue.task_done()
                 
-            except queue.Empty: continue
+            except queue.Empty: 
+                continue
             except Exception as e:
                 print(f"[!] XAI worker error: {e}")
+                import traceback
+                traceback.print_exc()
 
 
     def _handle_known_attack(self, packet, packet_id, enhanced_features, confidence, packet_info, raw_features, extra_metrics):
         """Handle alert and queue 95-dim features for XAI"""
-        initial_expl = {"title": "🔍 Analyzing Attack...", "risk_level": "HIGH", "status": "analyzing", **extra_metrics}
+        initial_expl = {
+            "title": "🚨 Known Attack Detected",
+            "description": f"Ensemble AI flagged this traffic with {confidence:.1%} confidence. SHAP analysis in progress...",
+            "risk_level": "HIGH", 
+            "status": "analyzing", 
+            **extra_metrics
+        }
         
         packet_obj = self._create_packet_object(packet, packet_id, "known_attack", confidence, initial_expl, raw_features)
         self.packet_storage.add_packet(packet_obj)
@@ -265,7 +288,13 @@ class Detector:
 
     def _handle_zero_day(self, packet, packet_id, enhanced_features, error, packet_info, raw_features, extra_metrics):
         """Handle zero-day and queue 95-dim features for XAI"""
-        initial_expl = {"title": "🔬 Analyzing Anomaly...", "risk_level": "CRITICAL", "status": "analyzing", **extra_metrics}
+        initial_expl = {
+            "title": "🔬 Novelty/Zero-Day Alert", 
+            "description": f"MAE/Autoencoder detected structural deviation (MSE: {error:.4f}). Validating novelty...",
+            "risk_level": "CRITICAL", 
+            "status": "analyzing", 
+            **extra_metrics
+        }
         
         packet_obj = self._create_packet_object(packet, packet_id, "zero_day", error, initial_expl, raw_features)
         self.packet_storage.add_packet(packet_obj)
@@ -278,7 +307,14 @@ class Detector:
             })
 
     def _handle_normal(self, packet, packet_id, packet_info, raw_features, extra_metrics):
-        expl = {"type": "NORMAL", "title": "✅ Normal Traffic", "risk_level": "LOW", **extra_metrics}
+        
+        expl = {
+            "type": "NORMAL", 
+            "title": "✅ Normal Traffic", 
+            "description": "Traffic aligns with learned network baseline. No threats detected.",
+            "risk_level": "LOW", 
+            **extra_metrics
+        }
         packet_obj = self._create_packet_object(packet, packet_id, "normal", 0.0, expl, raw_features)
         self.packet_storage.add_packet(packet_obj)
 

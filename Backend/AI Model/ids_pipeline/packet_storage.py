@@ -83,7 +83,28 @@ class PacketStorage:
         except Exception as e:
             print(f"[!] Database Connection Error: {e}")
             return None
-
+    def update_packet_xai_results(self, packet_id, explanation, status, confidence):
+        """Dedicated update for XAI results that DOES NOT touch network metadata."""
+        with self.db_lock:
+            conn = self._get_conn()
+            if not conn: return
+            try:
+                cursor = conn.cursor()
+                expl_json = json.dumps(explanation)
+                
+                # SQL: Only update status, confidence, and explanation columns
+                cursor.execute('''
+                    UPDATE packets SET 
+                        status=%s, confidence=%s, explanation=%s
+                    WHERE packet_id_backend=%s
+                ''', (status, float(confidence), expl_json, packet_id))
+                
+                conn.commit()
+            except Exception as e:
+                print(f"[!] DB XAI Update Error: {e}")
+            finally:
+                conn.close()
+                
     def _refresh_stats(self):
         with self.db_lock:
             conn = self._get_conn()

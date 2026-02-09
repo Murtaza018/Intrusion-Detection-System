@@ -68,7 +68,7 @@ class XAIExplainer:
     
     
     def generate_explanation(self, features, model_predict_func, confidence, packet_info, attack_type="Attack"):
-        """Generate explanation accounting for Raw, Topological, and Visual features"""
+        """Robust explanation generator for 95-feature fusion."""
         try:
             if not self.initialized:
                 if not self.initialize_shap(model_predict_func):
@@ -77,24 +77,21 @@ class XAIExplainer:
             # features is (1, 95)
             shap_values = self.shap_explainer.shap_values(features.reshape(1, -1), nsamples=50, silent=True)
             
-            # --- FIXED ROBUST EXTRACTION (REMOVED target_array variable) ---
+            # FIX: Robust extraction without intermediate target_array variable
             if isinstance(shap_values, list):
-                # For binary/multi-class, take positive class (index 1) or first (index 0)
-                vals_to_flatten = shap_values[1] if len(shap_values) > 1 else shap_values[0]
-                shap_vals = vals_to_flatten.flatten()
+                # For binary output: index 1 is positive class, fallback to 0
+                shap_vals = (shap_values[1] if len(shap_values) > 1 else shap_values[0]).flatten()
             else:
                 shap_vals = shap_values.flatten()
             
-            # FORCE SLICE TO 95 (Roadmap Point 2 Alignment)
+            # Strictly slice to 95 and proceed
             shap_vals = shap_vals[:95] 
-            
-            # Get top contributors using the sliced array
             top_features = self._get_top_features(shap_vals, features.flatten()[:95])
             
-            # Construct the Explanation Object
-            explanation = {
+            return {
                 "type": "HYBRID_ENSEMBLE_XAI",
                 "title": f"🚨 {attack_type.replace('_', ' ').title()} Detected",
+                "description": "Deep feature analysis complete. Review the 9x9 grid and feature bars for structural proof.",
                 "risk_level": "CRITICAL" if attack_type == "zero_day" else "HIGH",
                 "confidence": f"{confidence:.1%}",
                 "top_contributing_factors": top_features,
@@ -105,14 +102,10 @@ class XAIExplainer:
                 "recommended_actions": self._get_recommended_actions(attack_type),
                 "timestamp": datetime.now().isoformat()
             }
-            return explanation
-            
         except Exception as e:
-            print(f"[!] XAI Error: {e}")
-            import traceback
-            traceback.print_exc() 
+            print(f"[!] XAI Final Exception: {e}")
             return self._generate_fallback_explanation(features, confidence, packet_info, attack_type)
-    
+        
     def _get_top_features(self, shap_values, features, top_n=5):
         contributions = []
         for i, contrib in enumerate(shap_values):

@@ -3,7 +3,6 @@ import '../providers/ids_provider.dart';
 
 class MaeVisualizerDialog extends StatefulWidget {
   final Packet packet;
-
   const MaeVisualizerDialog({required this.packet, Key? key}) : super(key: key);
 
   @override
@@ -11,10 +10,10 @@ class MaeVisualizerDialog extends StatefulWidget {
 }
 
 class _MaeVisualizerDialogState extends State<MaeVisualizerDialog> {
-  // --- STATE: Tracks which cell is currently "Pinned" ---
-  int? pinnedIndex;
+  // --- STATE: Track two comparison subjects ---
+  int? pinnedA;
+  int? pinnedB;
 
-  // --- FEATURE MAPPING (Preserved 78-feature list) ---
   final List<String> featureNames = [
     "Destination Port",
     "Flow Duration",
@@ -96,31 +95,40 @@ class _MaeVisualizerDialogState extends State<MaeVisualizerDialog> {
     "Label Index"
   ];
 
+  void _handleCellTap(int index) {
+    setState(() {
+      if (pinnedA == index) {
+        pinnedA = null;
+      } else if (pinnedB == index) {
+        pinnedB = null;
+      } else if (pinnedA == null) {
+        pinnedA = index;
+      } else {
+        pinnedB = index; // Overwrites B if both are full, or fills B if empty
+      }
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
-    final explanation = widget.packet.explanation ?? {};
-    final List<dynamic> factors = explanation['top_contributing_factors'] ?? [];
-
-    // Prepare Grid Data
+    final factors =
+        widget.packet.explanation?['top_contributing_factors'] ?? [];
     List<double> gridData = List.filled(81, 0.0);
-    for (int i = 0; i < factors.length; i++) {
-      if (i < 81) {
-        double val = double.tryParse(
-                factors[i]['observed_value']?.toString() ?? '0.0') ??
-            0.0;
-        gridData[i] = val.clamp(0.0, 1.0);
-      }
+    for (int i = 0; i < factors.length && i < 81; i++) {
+      gridData[i] =
+          (double.tryParse(factors[i]['observed_value']?.toString() ?? '0.0') ??
+                  0.0)
+              .clamp(0.0, 1.0);
     }
 
     return AlertDialog(
       backgroundColor: const Color(0xFF0D1117),
-      insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 20),
+      insetPadding: const EdgeInsets.all(20),
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
-        side: const BorderSide(color: Colors.white10),
-      ),
+          borderRadius: BorderRadius.circular(12),
+          side: const BorderSide(color: Colors.white10)),
       content: SizedBox(
-        width: 600, // Wider to accommodate the inspector panel
+        width: 800, // Widened for Dual-Panel comparison
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -129,15 +137,13 @@ class _MaeVisualizerDialogState extends State<MaeVisualizerDialog> {
             Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // LEFT: THE INTERACTIVE GRID
                 _buildGrid(gridData),
                 const SizedBox(width: 24),
-                // RIGHT: THE FEATURE INSPECTOR
-                Expanded(child: _buildInspector(gridData)),
+                Expanded(child: _buildDualInspector(gridData)),
               ],
             ),
             const SizedBox(height: 24),
-            _buildFooterActions(),
+            _buildFooter(),
           ],
         ),
       ),
@@ -146,38 +152,32 @@ class _MaeVisualizerDialogState extends State<MaeVisualizerDialog> {
 
   Widget _buildGrid(List<double> gridData) {
     return Container(
-      width: 280,
-      height: 280,
+      width: 300,
+      height: 300,
       padding: const EdgeInsets.all(8),
       decoration: BoxDecoration(
-        color: Colors.black,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: Colors.white10),
-      ),
+          color: Colors.black,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: Colors.white10)),
       child: GridView.builder(
         physics: const NeverScrollableScrollPhysics(),
         gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-          crossAxisCount: 9,
-          crossAxisSpacing: 3,
-          mainAxisSpacing: 3,
-        ),
+            crossAxisCount: 9, crossAxisSpacing: 4, mainAxisSpacing: 4),
         itemCount: 81,
         itemBuilder: (context, index) {
-          double val = gridData[index];
-          bool isPinned = pinnedIndex == index;
-
+          bool isA = pinnedA == index;
+          bool isB = pinnedB == index;
           return GestureDetector(
-            onTap: () => setState(() => pinnedIndex = index),
-            child: MouseRegion(
-              cursor: SystemMouseCursors.click,
-              child: Container(
-                decoration: BoxDecoration(
-                  color: _getHeatmapColor(val, widget.packet.status),
-                  borderRadius: BorderRadius.circular(1),
-                  border: isPinned
-                      ? Border.all(color: const Color(0xFF00E5FF), width: 1.5)
-                      : null,
-                ),
+            onTap: () => _handleCellTap(index),
+            child: Container(
+              decoration: BoxDecoration(
+                color: _getHeatmapColor(gridData[index], widget.packet.status),
+                borderRadius: BorderRadius.circular(1),
+                border: isA
+                    ? Border.all(color: const Color(0xFF00E5FF), width: 2)
+                    : (isB
+                        ? Border.all(color: Colors.pinkAccent, width: 2)
+                        : null),
               ),
             ),
           );
@@ -186,112 +186,104 @@ class _MaeVisualizerDialogState extends State<MaeVisualizerDialog> {
     );
   }
 
-  Widget _buildInspector(List<double> gridData) {
-    if (pinnedIndex == null) {
-      return Container(
-        height: 280,
-        alignment: Alignment.center,
-        decoration: BoxDecoration(
-          color: Colors.white.withOpacity(0.02),
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: Colors.white.withOpacity(0.05)),
-        ),
-        child: const Text(
-          "SELECT A CELL TO INSPECT\nSTRUCTURAL FEATURE",
-          textAlign: TextAlign.center,
-          style:
-              TextStyle(color: Colors.white24, fontSize: 10, letterSpacing: 1),
-        ),
-      );
-    }
+  Widget _buildDualInspector(List<double> gridData) {
+    return Column(
+      children: [
+        _buildInspectorPane(
+            "SUBJECT ALPHA", pinnedA, gridData, const Color(0xFF00E5FF)),
+        const SizedBox(height: 12),
+        _buildInspectorPane(
+            "SUBJECT BETA", pinnedB, gridData, Colors.pinkAccent),
+      ],
+    );
+  }
 
-    final String name = pinnedIndex! < featureNames.length
-        ? featureNames[pinnedIndex!]
-        : "Padding Segment";
-    final double value = gridData[pinnedIndex!];
+  Widget _buildInspectorPane(
+      String title, int? index, List<double> gridData, Color themeColor) {
+    bool hasData = index != null;
+    String name = hasData
+        ? (index < featureNames.length
+            ? featureNames[index]
+            : "Auxiliary Segment")
+        : "---";
+    double val = hasData ? gridData[index] : 0.0;
 
-    return Container(
-      height: 280,
-      padding: const EdgeInsets.all(20),
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 300),
+      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: const Color(0xFF15191C),
+        color: hasData
+            ? themeColor.withOpacity(0.03)
+            : Colors.white.withOpacity(0.01),
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: const Color(0xFF00E5FF).withOpacity(0.3)),
+        border: Border.all(
+            color: hasData ? themeColor.withOpacity(0.4) : Colors.white10),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text("FEATURE INSPECTOR",
-              style: TextStyle(
-                  color: Color(0xFF00E5FF),
-                  fontSize: 9,
-                  fontWeight: FontWeight.bold,
-                  letterSpacing: 1.5)),
-          const SizedBox(height: 16),
-          Text(name.toUpperCase(),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(title,
+                  style: TextStyle(
+                      color: themeColor,
+                      fontSize: 8,
+                      fontWeight: FontWeight.bold,
+                      letterSpacing: 1.2)),
+              if (hasData)
+                Icon(Icons.check_circle, size: 10, color: themeColor),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(name,
               style: const TextStyle(
                   color: Colors.white,
-                  fontSize: 13,
+                  fontSize: 11,
                   fontWeight: FontWeight.bold,
                   fontFamily: 'monospace')),
-          const Divider(color: Colors.white10, height: 24),
-          _inspectorRow("Grid Coordinate",
-              "Row ${pinnedIndex! ~/ 9 + 1}, Col ${pinnedIndex! % 9 + 1}"),
-          _inspectorRow(
-              "Anomaly Intensity", "${(value * 100).toStringAsFixed(2)}%"),
-          const SizedBox(height: 16),
+          const SizedBox(height: 12),
           LinearProgressIndicator(
-            value: value,
-            backgroundColor: Colors.white.withOpacity(0.05),
-            color: _getHeatmapColor(value, widget.packet.status),
-            minHeight: 4,
+              value: val,
+              color: themeColor,
+              backgroundColor: Colors.white.withOpacity(0.05),
+              minHeight: 2),
+          const SizedBox(height: 8),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                  hasData
+                      ? "COORD: R${index ~/ 9 + 1} C${index % 9 + 1}"
+                      : "NO SELECTION",
+                  style: const TextStyle(color: Colors.white24, fontSize: 9)),
+              Text("${(val * 100).toStringAsFixed(1)}%",
+                  style: TextStyle(
+                      color: hasData ? Colors.white70 : Colors.white10,
+                      fontSize: 10,
+                      fontFamily: 'monospace')),
+            ],
           ),
-          const Spacer(),
-          TextButton.icon(
-            onPressed: () => setState(() => pinnedIndex = null),
-            icon: const Icon(Icons.close, size: 14, color: Colors.white24),
-            label: const Text("CLEAR PIN",
-                style: TextStyle(color: Colors.white24, fontSize: 10)),
-          )
         ],
       ),
     );
   }
 
-  Widget _inspectorRow(String label, String val) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(label,
-              style: const TextStyle(color: Colors.white30, fontSize: 9)),
-          const SizedBox(height: 4),
-          Text(val,
-              style: const TextStyle(
-                  color: Colors.white70,
-                  fontSize: 11,
-                  fontFamily: 'monospace')),
-        ],
-      ),
-    );
-  }
-
-  // --- Helper UI Builders ---
   Widget _buildHeader() {
     return Row(
       children: [
-        const Icon(Icons.grid_view_rounded, color: Color(0xFF00E5FF), size: 20),
+        const Icon(Icons.compare_arrows_rounded,
+            color: Color(0xFF00E5FF), size: 20),
         const SizedBox(width: 12),
         Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: const [
-            Text("MAE STRUCTURAL RECONSTRUCTION",
+            Text("COMPARATIVE STRUCTURAL ANALYSIS",
                 style: TextStyle(
                     color: Colors.white,
                     fontSize: 16,
                     fontWeight: FontWeight.bold)),
-            Text("9x9 Tabular-to-Image Feature Mapping",
+            Text("Select two features to cross-reference anomaly distribution",
                 style: TextStyle(color: Colors.white24, fontSize: 10)),
           ],
         ),
@@ -299,33 +291,28 @@ class _MaeVisualizerDialogState extends State<MaeVisualizerDialog> {
     );
   }
 
-  Widget _buildFooterActions() {
+  Widget _buildFooter() {
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
-        const Text(
-          "Click cells to pin features for detailed analysis.",
-          style: TextStyle(
-              color: Colors.white24, fontSize: 10, fontStyle: FontStyle.italic),
-        ),
+        const Text("Alpha (Cyan) vs Beta (Pink) Correlation Mode",
+            style: TextStyle(
+                color: Colors.white24,
+                fontSize: 9,
+                fontStyle: FontStyle.italic)),
         TextButton(
-          onPressed: () => Navigator.pop(context),
-          child: const Text("DISMISS",
-              style: TextStyle(
-                  color: Colors.white70, fontWeight: FontWeight.bold)),
-        ),
+            onPressed: () => Navigator.pop(context),
+            child: const Text("CLOSE ANALYSIS",
+                style: TextStyle(
+                    color: Colors.white70, fontWeight: FontWeight.bold))),
       ],
     );
   }
 
   Color _getHeatmapColor(double value, String status) {
     if (value < 0.05) return Colors.white.withOpacity(0.05);
-    if (status == 'normal') {
-      return Color.lerp(
-          Colors.cyan.withOpacity(0.1), Colors.cyanAccent, value)!;
-    } else {
-      return Color.lerp(
-          Colors.orange.withOpacity(0.2), Colors.redAccent, value)!;
-    }
+    return status == 'normal'
+        ? Color.lerp(Colors.cyan.withOpacity(0.1), Colors.cyanAccent, value)!
+        : Color.lerp(Colors.orange.withOpacity(0.2), Colors.redAccent, value)!;
   }
 }

@@ -16,6 +16,7 @@ dependencies:
   flutter_dotenv: ^5.1.0
   syncfusion_flutter_gauges: ^21.1.35
   cryptography: ^2.9.0
+  hex: ^0.2.0
 
 dev_dependencies:
   flutter_test:

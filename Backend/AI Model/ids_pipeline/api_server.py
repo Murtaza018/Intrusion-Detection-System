@@ -57,22 +57,33 @@ class APIServer:
         self._register_routes()
 
     def _initialize_ecc(self):
-        """Loads the ECC Private Key for response signing."""
+        """Loads the ECC Private Key using absolute pathing."""
         try:
-            # Look for keys in the Backend/ECC folder
-            key_path = os.path.join("Backend", "ECC", "key.pem")
+            # 1. Get the directory where api_server.py is located
+            # Path: .../Backend/AI Model/ids_pipeline/
+            script_dir = os.path.dirname(os.path.abspath(__file__))
+
+            # 2. Go up two levels to reach the 'Backend' folder
+            # Path: .../Backend/
+            backend_base = os.path.abspath(os.path.join(script_dir, "..", ".."))
+
+            # 3. Target the ECC folder inside Backend
+            key_path = os.path.join(backend_base, "ECC", "key.pem")
+
             if not os.path.exists(key_path):
-                # Fallback to local path if running from within Backend
-                key_path = "ECC/key.pem"
+                # Final fallback: check the current working directory
+                key_path = os.path.abspath("Backend/ECC/key.pem")
 
             with open(key_path, "rb") as key_file:
                 self.private_key = serialization.load_pem_private_key(
                     key_file.read(),
-                    password=None, # Update this if your key has a passphrase
+                    password=None, 
                 )
-            print("[*] ECC Security Layer: key.pem loaded successfully.")
+            print(f"[*] ECC Security Layer: {key_path} loaded successfully.")
+            
         except Exception as e:
             print(f"[!] ECC Initialization Error: {e}")
+            print(f"[!] Attempted path: {key_path if 'key_path' in locals() else 'Unknown'}")
             self.private_key = None
 
     def _generate_signature(self, data_dict):

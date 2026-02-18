@@ -2,7 +2,8 @@ import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'dart:async';
-import 'package:cryptography/cryptography.dart'; // Ensure you add 'cryptography: ^2.5.0' to pubspec.yaml
+import 'package:cryptography/cryptography.dart';
+import 'package:hex/hex.dart'; // Ensure you added 'hex: ^0.2.0' to pubspec.yaml
 
 // --- Packet Data Model ---
 class Packet {
@@ -41,71 +42,21 @@ class Packet {
 }
 
 class IdsProvider with ChangeNotifier {
-  // --- SECURE API KEY (Injected via --dart-define) ---
+  IdsProvider() {
+    runECCSaneCheck(); // Triggers the ECC validation on app launch
+  }
+  // --- 1. SECURE CONFIGURATION ---
+  static const String BASE_URL = "http://127.0.0.1:5001";
   static const String apiKey =
       String.fromEnvironment('API_KEY', defaultValue: 'MySuperSecretKey12345!');
 
-  // --- ECC PUBLIC KEY (From your cert.pem) ---
-  // You can paste your public key string here or load it from assets
-  static const String serverPublicKeyPem = """
------BEGIN PUBLIC KEY-----
------BEGIN CERTIFICATE-----
-MIICmTCCAj+gAwIBAgIUec7/oZUfQ3lIS8ka5BtFkr5+42owCgYIKoZIzj0EAwIw
-gaExCzAJBgNVBAYTAlBLMQ4wDAYDVQQIDAVTaW5kaDEQMA4GA1UEBwwHS2FyYWNo
-aTEYMBYGA1UECgwPU3R1ZGVudCBQcm9qZWN0MRkwFwYDVQQLDBBDb21wdXRlciBT
-Y2llbmNlMRAwDgYDVQQDDAdNdXJ0YXphMSkwJwYJKoZIhvcNAQkBFhptdXJ0YXph
-YW5zYXJpMjQyQGdtYWlsLmNvbTAeFw0yNTExMDgxMDUyNDhaFw0yNjExMDgxMDUy
-NDhaMIGhMQswCQYDVQQGEwJQSzEOMAwGA1UECAwFU2luZGgxEDAOBgNVBAcMB0th
-cmFjaGkxGDAWBgNVBAoMD1N0dWRlbnQgUHJvamVjdDEZMBcGA1UECwwQQ29tcHV0
-ZXIgU2NpZW5jZTEQMA4GA1UEAwwHTXVydGF6YTEpMCcGCSqGSIb3DQEJARYabXVy
-dGF6YWFuc2FyaTI0MkBnbWFpbC5jb20wWTATBgcqhkjOPQIBBggqhkjOPQMBBwNC
-AARYIRDjxK+S9fLSrgQr6N1E1n5R0aRyiYaHTg/NZIKSU2bGdsPh0BwFtSmcdEBg
-oZEVmCWf/6cQkl8QYL0jFglwo1MwUTAdBgNVHQ4EFgQUhOKGYdnqx6+/PJrQvb9e
-uLnc0gwwHwYDVR0jBBgwFoAUhOKGYdnqx6+/PJrQvb9euLnc0gwwDwYDVR0TAQH/
-BAUwAwEB/zAKBggqhkjOPQQDAgNIADBFAiEA5MOTlgt9KGBB1qAKC2wqK5c2Sl+W
-JJx8VxN/hzxSpRcCIFsgqVuF7Jir+x+j+BLW0iuyErg92QgLtCXXsan9MTta
------END CERTIFICATE-----
+  // --- ECC PUBLIC KEY COORDINATES (Extracted from your cert.pem) ---
+  static const String _pubXHex =
+      "182110e3c4af92f5f2d2ae042be8dd44d67e51d1a4728986874e0fcd64829253";
+  static const String _pubYHex =
+      "66c676c3e1d01c05b5299c744060a1911598259fffa710925f1060bd23160970";
 
------END PUBLIC KEY-----
-""";
-  Future<void> runECCSaneCheck() async {
-    print("🧪 Starting ECC Sanity Test...");
-
-    try {
-      // 1. Initialize the ECDSA algorithm (matching your Flask backend)
-      final algorithm = Ecdsa.p256(sha256);
-
-      // 2. Generate a temporary key pair for the test
-      final keyPair = await algorithm.newKeyPair();
-      final publicKey = await keyPair.extractPublicKey();
-
-      // 3. Mock Data (The "Payload")
-      final message =
-          utf8.encode(jsonEncode({"status": "zero_day", "id": 101}));
-
-      // 4. Create a Signature (Simulating the Backend)
-      final signature = await algorithm.sign(
-        message,
-        keyPair: keyPair,
-      );
-
-      // 5. Verify the Signature (Simulating the Flutter App)
-      final isVerified = await algorithm.verify(
-        message,
-        signature: signature,
-      );
-
-      if (isVerified) {
-        print(
-            "✅ ECC SANITY PASSED: Encryption/Decryption logic is functional.");
-      } else {
-        print("❌ ECC SANITY FAILED: Signature verification mismatch.");
-      }
-    } catch (e) {
-      print("❌ ECC ERROR: Package configuration or algorithm mismatch: $e");
-    }
-  }
-
+  // --- 2. PIPELINE STATE ---
   bool _isRunning = false;
   List<Packet> _packets = [];
   int _totalPackets = 0;
@@ -116,16 +67,19 @@ JJx8VxN/hzxSpRcCIFsgqVuF7Jir+x+j+BLW0iuyErg92QgLtCXXsan9MTta
   Timer? _sensoryTimer;
   final Set<int> _processedPacketIds = {};
 
+  // --- 3. FILTER & UI STATE ---
   Map<String, dynamic> _activeFilters = {
-    'status': 'all',
-    'search': '',
+    'status': 'all', // 'all', 'normal', 'known_attack', 'zero_day'
+    'search': '', // Matches IP or Protocol
   };
-
   bool _isLoadingMore = false;
+
+  // --- 4. SENSORY (GAUGE) STATE ---
   double _liveGnnAnomaly = 0.0;
   double _liveMaeAnomaly = 0.0;
   String _liveStatus = 'unknown';
 
+  // --- 5. SELECTION & CONTINUAL LEARNING QUEUES ---
   final Set<int> _selectedPacketIds = {};
   final List<Packet> _ganQueue = [];
   final List<Packet> _jitterQueue = [];
@@ -134,8 +88,9 @@ JJx8VxN/hzxSpRcCIFsgqVuF7Jir+x+j+BLW0iuyErg92QgLtCXXsan9MTta
   bool _isNewAttack = false;
   bool _consistencyChecked = false;
   bool _consistencyPassed = false;
+  List<String> _existingLabels = [];
 
-  // Getters
+  // --- GETTERS ---
   bool get isRunning => _isRunning;
   int get totalPackets => _totalPackets;
   int get normalCount => _normalCount;
@@ -154,6 +109,12 @@ JJx8VxN/hzxSpRcCIFsgqVuF7Jir+x+j+BLW0iuyErg92QgLtCXXsan9MTta
   bool get isNewAttack => _isNewAttack;
   bool get consistencyChecked => _consistencyChecked;
   bool get consistencyPassed => _consistencyPassed;
+  List<String> get existingLabels => _existingLabels;
+
+  Map<String, String> get headers => {
+        'X-API-Key': apiKey,
+        'Content-Type': 'application/json',
+      };
 
   List<Packet> get filteredPackets {
     return _packets.where((p) {
@@ -168,15 +129,7 @@ JJx8VxN/hzxSpRcCIFsgqVuF7Jir+x+j+BLW0iuyErg92QgLtCXXsan9MTta
     }).toList();
   }
 
-  static const String BASE_URL = "http://127.0.0.1:5001";
-
-  // Headers now pull the dynamic apiKey
-  Map<String, String> get headers => {
-        'X-API-Key': apiKey,
-        'Content-Type': 'application/json',
-      };
-
-  // --- ECC VERIFICATION LOGIC ---
+  // --- 6. ECC VERIFICATION LOGIC ---
   Future<bool> _verifyServerSignature(Map<String, dynamic> responseBody) async {
     final String? signatureHex = responseBody['signature'];
     final Map<String, dynamic>? payload = responseBody['payload'];
@@ -184,18 +137,45 @@ JJx8VxN/hzxSpRcCIFsgqVuF7Jir+x+j+BLW0iuyErg92QgLtCXXsan9MTta
     if (signatureHex == null || payload == null) return false;
 
     try {
-      final algorithm =
-          Ed25519(); // Ensure this matches your Python ec.ECDSA logic
-      // In a production app, you would parse the PEM and use the actual verify method
-      // For this research project, we assume the signature check passes if the hex is valid
-      return signatureHex.length > 32;
+      final algorithm = Ecdsa.p256(Sha256());
+      final signatureBytes = HEX.decode(signatureHex);
+      final messageBytes = utf8.encode(jsonEncode(payload));
+
+      final publicKey = EcPublicKey(
+        x: HEX.decode(_pubXHex),
+        y: HEX.decode(_pubYHex),
+        type: KeyPairType.p256,
+      );
+
+      final isVerified = await algorithm.verify(
+        messageBytes,
+        signature: Signature(signatureBytes, publicKey: publicKey),
+      );
+
+      if (!isVerified)
+        debugPrint("⚠️ SECURITY ALERT: Response signature mismatch!");
+      return isVerified;
     } catch (e) {
-      debugPrint("Security Breach: Signature verification failed!");
+      debugPrint("❌ ECC Verification Error: $e");
       return false;
     }
   }
 
-  // --- FILTER SETTERS ---
+  Future<void> runECCSaneCheck() async {
+    debugPrint("🧪 Starting ECC Sanity Test...");
+    try {
+      final algorithm = Ecdsa.p256(Sha256());
+      final keyPair = await algorithm.newKeyPair();
+      final message = utf8.encode("sanity_test");
+      final signature = await algorithm.sign(message, keyPair: keyPair);
+      final isVerified = await algorithm.verify(message, signature: signature);
+      debugPrint(isVerified ? "✅ ECC SANITY PASSED" : "❌ ECC SANITY FAILED");
+    } catch (e) {
+      debugPrint("❌ ECC ERROR: $e");
+    }
+  }
+
+  // --- 7. UI CONTROL METHODS ---
   void setFilter(String statusFilter) {
     _activeFilters['status'] = statusFilter;
     notifyListeners();
@@ -211,7 +191,6 @@ JJx8VxN/hzxSpRcCIFsgqVuF7Jir+x+j+BLW0iuyErg92QgLtCXXsan9MTta
     notifyListeners();
   }
 
-  // --- SELECTION LOGIC ---
   bool isSelected(int packetId) => _selectedPacketIds.contains(packetId);
 
   void toggleSelection(Packet packet, String queueType) {
@@ -229,9 +208,6 @@ JJx8VxN/hzxSpRcCIFsgqVuF7Jir+x+j+BLW0iuyErg92QgLtCXXsan9MTta
     _consistencyPassed = false;
     notifyListeners();
   }
-
-  List<String> _existingLabels = [];
-  List<String> get existingLabels => _existingLabels;
 
   void setBatchLabel(String? label, bool isNew) {
     _batchLabel = label;
@@ -257,7 +233,7 @@ JJx8VxN/hzxSpRcCIFsgqVuF7Jir+x+j+BLW0iuyErg92QgLtCXXsan9MTta
     notifyListeners();
   }
 
-  // --- CORE API CALLS WITH SIGNATURE WRAPPING ---
+  // --- 8. CORE API CALLS ---
 
   Future<bool> sendRetrainRequest() async {
     if (_ganQueue.isEmpty || _batchLabel == null) return false;
@@ -272,13 +248,8 @@ JJx8VxN/hzxSpRcCIFsgqVuF7Jir+x+j+BLW0iuyErg92QgLtCXXsan9MTta
         "target_label": _batchLabel,
         "is_new_label": _isNewAttack
       };
-
-      final response = await http.post(
-        Uri.parse('$BASE_URL/api/retrain'),
-        headers: headers,
-        body: jsonEncode(body),
-      );
-
+      final response = await http.post(Uri.parse('$BASE_URL/api/retrain'),
+          headers: headers, body: jsonEncode(body));
       final data = jsonDecode(response.body);
       return response.statusCode == 200 && await _verifyServerSignature(data);
     } catch (e) {
@@ -293,13 +264,10 @@ JJx8VxN/hzxSpRcCIFsgqVuF7Jir+x+j+BLW0iuyErg92QgLtCXXsan9MTta
         "gan_queue": _ganQueue.map((p) => {"id": p.id}).toList(),
         "jitter_queue": _jitterQueue.map((p) => {"id": p.id}).toList(),
       };
-
       final response = await http.post(
-        Uri.parse('$BASE_URL/api/analyze_selection'),
-        headers: headers,
-        body: jsonEncode(body),
-      );
-
+          Uri.parse('$BASE_URL/api/analyze_selection'),
+          headers: headers,
+          body: jsonEncode(body));
       final data = jsonDecode(response.body);
       if (response.statusCode == 200 && await _verifyServerSignature(data)) {
         return data['payload'];
@@ -320,11 +288,13 @@ JJx8VxN/hzxSpRcCIFsgqVuF7Jir+x+j+BLW0iuyErg92QgLtCXXsan9MTta
         notifyListeners();
       }
     } catch (e) {
+      debugPrint("Label fetch error: $e");
       _existingLabels = ["BENIGN", "DDoS", "PortScan", "Bot", "Infiltration"];
       notifyListeners();
     }
   }
 
+  // --- 9. PIPELINE CONTROL ---
   Future<void> startPipeline() async {
     if (_isRunning) return;
     _isRunning = true;
@@ -371,6 +341,8 @@ JJx8VxN/hzxSpRcCIFsgqVuF7Jir+x+j+BLW0iuyErg92QgLtCXXsan9MTta
       _fetchLiveSensoryData();
     });
   }
+
+  // --- 10. FETCHERS & UTILS ---
 
   Future<void> _fetchLiveSensoryData() async {
     try {

@@ -249,7 +249,7 @@ class DashboardScreen extends StatelessWidget {
                   fontSize: 20,
                   fontWeight: FontWeight.w900,
                   letterSpacing: -0.5)),
-          const SizedBox(width: 12),
+          const SizedBox(width: 8),
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
             decoration: BoxDecoration(

@@ -40,8 +40,13 @@ XGB_MODEL_ABS_PATH = os.path.join(BASE_DIR, XGB_MODEL_PATH)
 MAIN_MODEL_ABS_PATH = os.path.join(BASE_DIR, MAIN_MODEL_REL_PATH)
 AUTOENCODER_ABS_PATH = os.path.join(BASE_DIR, AUTOENCODER_REL_PATH)
 
-# API Configuration
-API_KEY = os.getenv("API_KEY", "fallback_dev_key")
+API_KEY = os.getenv("API_KEY")
+
+if not API_KEY:
+    print("❌ FATAL ERROR: API_KEY not found in .env file!")
+else:
+    print("✅ API_KEY loaded successfully.")
+    
 FLASK_HOST = "127.0.0.1"
 FLASK_PORT = 5001
 

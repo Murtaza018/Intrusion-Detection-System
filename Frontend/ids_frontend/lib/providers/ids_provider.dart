@@ -129,38 +129,6 @@ class IdsProvider with ChangeNotifier {
     }).toList();
   }
 
-  // --- 6. ECC VERIFICATION LOGIC ---
-  Future<bool> _verifyServerSignature(Map<String, dynamic> responseBody) async {
-    final String? signatureHex = responseBody['signature'];
-    final Map<String, dynamic>? payload = responseBody['payload'];
-
-    if (signatureHex == null || payload == null) return false;
-
-    try {
-      final algorithm = Ecdsa.p256(Sha256());
-      final signatureBytes = HEX.decode(signatureHex);
-      final messageBytes = utf8.encode(jsonEncode(payload));
-
-      final publicKey = EcPublicKey(
-        x: HEX.decode(_pubXHex),
-        y: HEX.decode(_pubYHex),
-        type: KeyPairType.p256,
-      );
-
-      final isVerified = await algorithm.verify(
-        messageBytes,
-        signature: Signature(signatureBytes, publicKey: publicKey),
-      );
-
-      if (!isVerified)
-        debugPrint("⚠️ SECURITY ALERT: Response signature mismatch!");
-      return isVerified;
-    } catch (e) {
-      debugPrint("❌ ECC Verification Error: $e");
-      return false;
-    }
-  }
-
   Future<void> runECCSaneCheck() async {
     debugPrint("🧪 Starting ECC Sanity Test...");
     try {
@@ -362,18 +330,72 @@ class IdsProvider with ChangeNotifier {
   }
 
   Future<void> _fetchRecentPackets() async {
+    print("📡 Network: Fetching packets...");
     try {
       final response = await http.get(
           Uri.parse('$BASE_URL/api/packets/recent?limit=100'),
           headers: headers);
+
+      print("📡 Network: Status Code ${response.statusCode}");
+
+      if (response.statusCode == 401) {
+        print("❌ SECURITY: API Key Rejected by Server!");
+        return;
+      }
+
       final data = jsonDecode(response.body);
-      if (response.statusCode == 200 && await _verifyServerSignature(data)) {
-        for (var packetData in data['payload']['packets']) {
+      print("📡 Network: Received Body Keys: ${data.keys.toList()}");
+
+      // Check signature
+      bool isSecure = await _verifyServerSignature(data);
+      print("🛡️ ECC: Signature Valid? $isSecure");
+
+      if (response.statusCode == 200 && isSecure) {
+        final List packets = data['payload']['packets'];
+        print("📦 Data: Found ${packets.length} packets in payload.");
+
+        for (var packetData in packets) {
           _addPacketFromApi(packetData);
         }
       }
     } catch (e) {
-      debugPrint('Fetch error: $e');
+      print("🚨 CRITICAL ERROR in Fetch: $e");
+    }
+  }
+
+  Future<bool> _verifyServerSignature(Map<String, dynamic> responseBody) async {
+    final String? signatureHex = responseBody['signature'];
+    final Map<String, dynamic>? payload = responseBody['payload'];
+
+    if (signatureHex == null || payload == null) {
+      print("🛡️ ECC: Missing signature or payload in response!");
+      return false;
+    }
+
+    try {
+      final algorithm = Ecdsa.p256(Sha256());
+      final signatureBytes = HEX.decode(signatureHex);
+      final messageBytes = utf8.encode(jsonEncode(payload));
+
+      final publicKey = EcPublicKey(
+        x: HEX.decode(_pubXHex),
+        y: HEX.decode(_pubYHex),
+        type: KeyPairType.p256,
+      );
+
+      final isVerified = await algorithm.verify(
+        messageBytes,
+        signature: Signature(signatureBytes, publicKey: publicKey),
+      );
+
+      if (!isVerified) {
+        print(
+            "🛡️ ECC: Signature mismatch! Check if _pubXHex matches your key.pem");
+      }
+      return isVerified;
+    } catch (e) {
+      print("🛡️ ECC: Math Error during verification: $e");
+      return false;
     }
   }
 

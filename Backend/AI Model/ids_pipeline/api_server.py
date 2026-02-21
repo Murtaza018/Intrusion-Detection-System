@@ -118,7 +118,12 @@ class APIServer:
         def require_api_key(f):
             @wraps(f)
             def decorated_function(*args, **kwargs):
-                if request.headers.get('X-API-Key') != API_KEY:
+                # GET THE KEY FROM HEADERS
+                sent_key = request.headers.get('X-API-Key')
+                
+               
+                
+                if sent_key != API_KEY:
                     return jsonify({"error": "Invalid API key"}), 401
                 return f(*args, **kwargs)
             return decorated_function

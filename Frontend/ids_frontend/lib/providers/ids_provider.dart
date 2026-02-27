@@ -1,3 +1,5 @@
+import 'dart:collection';
+
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
@@ -218,7 +220,8 @@ class IdsProvider with ChangeNotifier {
       };
       final response = await http.post(Uri.parse('$BASE_URL/api/retrain'),
           headers: headers, body: jsonEncode(body));
-      final data = jsonDecode(response.body);
+      // FIX: use bodyBytes
+      final data = jsonDecode(utf8.decode(response.bodyBytes));
       return response.statusCode == 200 && await _verifyServerSignature(data);
     } catch (e) {
       return false;
@@ -236,7 +239,8 @@ class IdsProvider with ChangeNotifier {
           Uri.parse('$BASE_URL/api/analyze_selection'),
           headers: headers,
           body: jsonEncode(body));
-      final data = jsonDecode(response.body);
+      // FIX: use bodyBytes
+      final data = jsonDecode(utf8.decode(response.bodyBytes));
       if (response.statusCode == 200 && await _verifyServerSignature(data)) {
         return data['payload'];
       }
@@ -250,7 +254,8 @@ class IdsProvider with ChangeNotifier {
     try {
       final response =
           await http.get(Uri.parse('$BASE_URL/api/labels'), headers: headers);
-      final data = jsonDecode(response.body);
+      // FIX: use bodyBytes
+      final data = jsonDecode(utf8.decode(response.bodyBytes));
       if (response.statusCode == 200 && await _verifyServerSignature(data)) {
         _existingLabels = List<String>.from(data['payload']['labels']);
         notifyListeners();
@@ -316,7 +321,8 @@ class IdsProvider with ChangeNotifier {
     try {
       final response = await http.get(Uri.parse('$BASE_URL/api/sensory/live'),
           headers: headers);
-      final data = jsonDecode(response.body);
+      // FIX: use bodyBytes
+      final data = jsonDecode(utf8.decode(response.bodyBytes));
       if (response.statusCode == 200 && await _verifyServerSignature(data)) {
         final payload = data['payload'];
         _liveGnnAnomaly = (payload['gnn_anomaly'] ?? 0.0).toDouble();
@@ -343,17 +349,17 @@ class IdsProvider with ChangeNotifier {
         return;
       }
 
-      final data = jsonDecode(response.body);
+      // FIX: use bodyBytes to avoid encoding truncation
+      final rawBody = utf8.decode(response.bodyBytes);
+      final data = jsonDecode(rawBody);
       print("📡 Network: Received Body Keys: ${data.keys.toList()}");
 
-      // Check signature
       bool isSecure = await _verifyServerSignature(data);
       print("🛡️ ECC: Signature Valid? $isSecure");
 
       if (response.statusCode == 200 && isSecure) {
         final List packets = data['payload']['packets'];
         print("📦 Data: Found ${packets.length} packets in payload.");
-
         for (var packetData in packets) {
           _addPacketFromApi(packetData);
         }
@@ -367,19 +373,19 @@ class IdsProvider with ChangeNotifier {
     final String? signatureHex = responseBody['signature'];
     final Map<String, dynamic>? payload = responseBody['payload'];
 
-    if (signatureHex == null || payload == null) {
-      print("🛡️ ECC: Missing signature or payload in response!");
-      return false;
-    }
+    if (signatureHex == null || payload == null) return false;
 
     try {
+      final sortedPayload = SplayTreeMap<String, dynamic>.from(payload);
+      String jsonString = jsonEncode(sortedPayload).replaceAll(' ', '');
+
       final algorithm = Ecdsa.p256(Sha256());
-      final signatureBytes = HEX.decode(signatureHex);
-      final messageBytes = utf8.encode(jsonEncode(payload));
+      final signatureBytes = Uint8List.fromList(HEX.decode(signatureHex));
+      final messageBytes = utf8.encode(jsonString);
 
       final publicKey = EcPublicKey(
-        x: HEX.decode(_pubXHex),
-        y: HEX.decode(_pubYHex),
+        x: Uint8List.fromList(HEX.decode(_pubXHex)),
+        y: Uint8List.fromList(HEX.decode(_pubYHex)),
         type: KeyPairType.p256,
       );
 
@@ -388,13 +394,9 @@ class IdsProvider with ChangeNotifier {
         signature: Signature(signatureBytes, publicKey: publicKey),
       );
 
-      if (!isVerified) {
-        print(
-            "🛡️ ECC: Signature mismatch! Check if _pubXHex matches your key.pem");
-      }
       return isVerified;
     } catch (e) {
-      print("🛡️ ECC: Math Error during verification: $e");
+      print("🛡️ ECC: Math Error: $e");
       return false;
     }
   }
@@ -408,7 +410,8 @@ class IdsProvider with ChangeNotifier {
       final response = await http.get(
           Uri.parse('$BASE_URL/api/packets/recent?limit=50&offset=$offset'),
           headers: headers);
-      final data = jsonDecode(response.body);
+      // FIX: use bodyBytes
+      final data = jsonDecode(utf8.decode(response.bodyBytes));
       if (response.statusCode == 200 && await _verifyServerSignature(data)) {
         for (var packetData in data['payload']['packets']) {
           final int id = packetData['id'];
@@ -465,7 +468,8 @@ class IdsProvider with ChangeNotifier {
     try {
       final response =
           await http.get(Uri.parse('$BASE_URL/api/stats'), headers: headers);
-      final data = jsonDecode(response.body);
+      // FIX: use bodyBytes
+      final data = jsonDecode(utf8.decode(response.bodyBytes));
       if (response.statusCode == 200 && await _verifyServerSignature(data)) {
         final stats = data['payload'];
         _totalPackets = stats['total_packets'] ?? _totalPackets;

@@ -9,7 +9,7 @@ import os
 import joblib
 import json
 import numpy as np
-from sklearn.metrics.pairwise import cosine_similarity
+from cryptography.hazmat.primitives.asymmetric import utils 
 
 # --- ECC CRYPTOGRAPHY IMPORTS ---
 from cryptography.hazmat.primitives import hashes, serialization
@@ -86,22 +86,36 @@ class APIServer:
             print(f"[!] Attempted path: {key_path if 'key_path' in locals() else 'Unknown'}")
             self.private_key = None
 
+    
+
     def _generate_signature(self, data_dict):
-        """Creates a digital signature for a JSON response body."""
         if not self.private_key:
             return "NO_KEY_LOADED"
         
         try:
-            # Serialize dict to a consistent JSON string
-            json_str = json.dumps(data_dict, sort_keys=True)
-            signature = self.private_key.sign(
+            json_str = json.dumps(data_dict, sort_keys=True, separators=(',', ':'))
+            
+            signature_der = self.private_key.sign(
                 json_str.encode(),
                 ec.ECDSA(hashes.SHA256())
             )
-            return signature.hex()
-        except:
-            return "SIGNING_FAILED"
-
+            
+            r, s = utils.decode_dss_signature(signature_der)
+            r_bytes = r.to_bytes(32, 'big')
+            s_bytes = s.to_bytes(32, 'big')
+            signature_raw = r_bytes + s_bytes
+            
+            sig_hex = signature_raw.hex()
+            
+            # ADD THESE
+            print(f"[SIG] r bytes: {len(r_bytes)}, s bytes: {len(s_bytes)}")
+            print(f"[SIG] Final hex: {sig_hex}")
+            print(f"[SIG] Final hex length: {len(sig_hex)}")
+            
+            return sig_hex
+        except Exception as e:
+            print(f"[!] Signing Error: {e}")
+            return "SIGNING_FAILED"    
     def _secure_response(self, data, status=200):
         """Helper to wrap all responses with a digital signature."""
         response_body = {

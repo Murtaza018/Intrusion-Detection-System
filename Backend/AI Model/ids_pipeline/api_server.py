@@ -80,7 +80,15 @@ class APIServer:
                     password=None, 
                 )
             print(f"[*] ECC Security Layer: {key_path} loaded successfully.")
-            
+            pub_numbers = self.private_key.public_key().public_numbers()
+            x_hex = pub_numbers.x.to_bytes(32, 'big').hex()
+            y_hex = pub_numbers.y.to_bytes(32, 'big').hex()
+            print(f"X length: {len(x_hex)}")
+            print(f"Y length: {len(y_hex)}")
+            print(f"X: '{x_hex}'")
+            print(f"Y: '{y_hex}'")
+            # Also print as individual chars to be sure
+            print(f"X[0:4]: '{x_hex[0:4]}'")
         except Exception as e:
             print(f"[!] ECC Initialization Error: {e}")
             print(f"[!] Attempted path: {key_path if 'key_path' in locals() else 'Unknown'}")

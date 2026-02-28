@@ -46,6 +46,7 @@ class Packet {
 class IdsProvider with ChangeNotifier {
   IdsProvider() {
     runECCSaneCheck(); // Triggers the ECC validation on app launch
+    runRealDataTest();
   }
   // --- 1. SECURE CONFIGURATION ---
   static const String BASE_URL = "http://127.0.0.1:5001";
@@ -54,9 +55,9 @@ class IdsProvider with ChangeNotifier {
 
   // --- ECC PUBLIC KEY COORDINATES (Extracted from your cert.pem) ---
   static const String _pubXHex =
-      "182110e3c4af92f5f2d2ae042be8dd44d67e51d1a4728986874e0fcd64829253";
+      "5182110e3c4af92f5f2d2ae042be8dd44d67e51d1a4728986874e0fcd64829253";
   static const String _pubYHex =
-      "66c676c3e1d01c05b5299c744060a1911598259fffa710925f1060bd23160970";
+      "066c676c3e1d01c05b5299c744060a1911598259fffa710925f1060bd23160970";
 
   // --- 2. PIPELINE STATE ---
   bool _isRunning = false;
@@ -129,6 +130,46 @@ class IdsProvider with ChangeNotifier {
           p.protocol.toLowerCase().contains(query);
       return matchesStatus && matchesSearch;
     }).toList();
+  }
+
+  Future<void> runRealDataTest() async {
+    debugPrint("🧪 Starting Real Data ECC Test...");
+    try {
+      const String testSigHex =
+          "df7a73349f2fd5744165c49bfc85e4716c13198329cec1050105ef53d82d505ebbf56d330831d5c1254038732ecc7892dffdb7f67f325df6e3c48ea5764f9e61";
+      const String testJsonStr =
+          '{"gnn_anomaly":0,"mae_anomaly":0.054724205285310745,"status":"normal"}';
+
+      debugPrint("🧪 Sig length: ${testSigHex.length}");
+
+      final algorithm = Ecdsa.p256(Sha256());
+      final messageBytes = utf8.encode(testJsonStr);
+      final signatureBytes = Uint8List.fromList(HEX.decode(testSigHex));
+
+      debugPrint("🧪 sig bytes length: ${signatureBytes.length}");
+
+      // Use BigInt to avoid sign-bit padding
+      final x = BigInt.parse(_pubXHex, radix: 16);
+      final y = BigInt.parse(_pubYHex, radix: 16);
+
+      final publicKey = EcPublicKey(
+        x: _bigIntToBytes(x),
+        y: _bigIntToBytes(y),
+        type: KeyPairType.p256,
+      );
+
+      debugPrint("🧪 Public key created OK");
+
+      final result = await algorithm.verify(
+        messageBytes,
+        signature: Signature(signatureBytes, publicKey: publicKey),
+      );
+
+      debugPrint("🧪 Real Data Test Result: $result");
+    } catch (e, stack) {
+      debugPrint("🧪 Real Data Test Error: $e");
+      debugPrint("🧪 Stack: $stack");
+    }
   }
 
   Future<void> runECCSaneCheck() async {
@@ -383,9 +424,13 @@ class IdsProvider with ChangeNotifier {
       final signatureBytes = Uint8List.fromList(HEX.decode(signatureHex));
       final messageBytes = utf8.encode(jsonString);
 
+      // FIX: Pass x and y as BigInt to avoid sign-bit padding issue
+      final x = BigInt.parse(_pubXHex, radix: 16);
+      final y = BigInt.parse(_pubYHex, radix: 16);
+
       final publicKey = EcPublicKey(
-        x: Uint8List.fromList(HEX.decode(_pubXHex)),
-        y: Uint8List.fromList(HEX.decode(_pubYHex)),
+        x: _bigIntToBytes(x),
+        y: _bigIntToBytes(y),
         type: KeyPairType.p256,
       );
 
@@ -399,6 +444,12 @@ class IdsProvider with ChangeNotifier {
       print("🛡️ ECC: Math Error: $e");
       return false;
     }
+  }
+
+  // Converts BigInt to exactly 32 bytes without sign padding
+  Uint8List _bigIntToBytes(BigInt number) {
+    final hex = number.toRadixString(16).padLeft(64, '0');
+    return Uint8List.fromList(HEX.decode(hex));
   }
 
   Future<void> loadMorePackets() async {

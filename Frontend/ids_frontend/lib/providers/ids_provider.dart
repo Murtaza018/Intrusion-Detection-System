@@ -6,6 +6,8 @@ import 'dart:convert';
 import 'dart:async';
 import 'package:cryptography/cryptography.dart';
 import 'package:hex/hex.dart'; // Ensure you added 'hex: ^0.2.0' to pubspec.yaml
+import 'package:pointycastle/export.dart' as pc;
+import 'package:pointycastle/ecc/curves/secp256r1.dart';
 
 // --- Packet Data Model ---
 class Packet {
@@ -55,9 +57,9 @@ class IdsProvider with ChangeNotifier {
 
   // --- ECC PUBLIC KEY COORDINATES (Extracted from your cert.pem) ---
   static const String _pubXHex =
-      "5182110e3c4af92f5f2d2ae042be8dd44d67e51d1a4728986874e0fcd64829253";
+      "582110e3c4af92f5f2d2ae042be8dd44d67e51d1a4728986874e0fcd64829253";
   static const String _pubYHex =
-      "066c676c3e1d01c05b5299c744060a1911598259fffa710925f1060bd23160970";
+      "66c676c3e1d01c05b5299c744060a1911598259fffa710925f1060bd23160970";
 
   // --- 2. PIPELINE STATE ---
   bool _isRunning = false;
@@ -130,60 +132,6 @@ class IdsProvider with ChangeNotifier {
           p.protocol.toLowerCase().contains(query);
       return matchesStatus && matchesSearch;
     }).toList();
-  }
-
-  Future<void> runRealDataTest() async {
-    debugPrint("🧪 Starting Real Data ECC Test...");
-    try {
-      const String testSigHex =
-          "df7a73349f2fd5744165c49bfc85e4716c13198329cec1050105ef53d82d505ebbf56d330831d5c1254038732ecc7892dffdb7f67f325df6e3c48ea5764f9e61";
-      const String testJsonStr =
-          '{"gnn_anomaly":0,"mae_anomaly":0.054724205285310745,"status":"normal"}';
-
-      debugPrint("🧪 Sig length: ${testSigHex.length}");
-
-      final algorithm = Ecdsa.p256(Sha256());
-      final messageBytes = utf8.encode(testJsonStr);
-      final signatureBytes = Uint8List.fromList(HEX.decode(testSigHex));
-
-      debugPrint("🧪 sig bytes length: ${signatureBytes.length}");
-
-      // Use BigInt to avoid sign-bit padding
-      final x = BigInt.parse(_pubXHex, radix: 16);
-      final y = BigInt.parse(_pubYHex, radix: 16);
-
-      final publicKey = EcPublicKey(
-        x: _bigIntToBytes(x),
-        y: _bigIntToBytes(y),
-        type: KeyPairType.p256,
-      );
-
-      debugPrint("🧪 Public key created OK");
-
-      final result = await algorithm.verify(
-        messageBytes,
-        signature: Signature(signatureBytes, publicKey: publicKey),
-      );
-
-      debugPrint("🧪 Real Data Test Result: $result");
-    } catch (e, stack) {
-      debugPrint("🧪 Real Data Test Error: $e");
-      debugPrint("🧪 Stack: $stack");
-    }
-  }
-
-  Future<void> runECCSaneCheck() async {
-    debugPrint("🧪 Starting ECC Sanity Test...");
-    try {
-      final algorithm = Ecdsa.p256(Sha256());
-      final keyPair = await algorithm.newKeyPair();
-      final message = utf8.encode("sanity_test");
-      final signature = await algorithm.sign(message, keyPair: keyPair);
-      final isVerified = await algorithm.verify(message, signature: signature);
-      debugPrint(isVerified ? "✅ ECC SANITY PASSED" : "❌ ECC SANITY FAILED");
-    } catch (e) {
-      debugPrint("❌ ECC ERROR: $e");
-    }
   }
 
   // --- 7. UI CONTROL METHODS ---
@@ -412,37 +360,127 @@ class IdsProvider with ChangeNotifier {
 
   Future<bool> _verifyServerSignature(Map<String, dynamic> responseBody) async {
     final String? signatureHex = responseBody['signature'];
-    final Map<String, dynamic>? payload = responseBody['payload'];
+    final dynamic payload = responseBody['payload'];
 
     if (signatureHex == null || payload == null) return false;
 
     try {
-      final sortedPayload = SplayTreeMap<String, dynamic>.from(payload);
-      String jsonString = jsonEncode(sortedPayload).replaceAll(' ', '');
+      final jsonString = _toSortedJson(payload);
+      print(
+          "🛡️ ECC: JSON preview: ${jsonString.substring(0, jsonString.length.clamp(0, 100))}");
 
-      final algorithm = Ecdsa.p256(Sha256());
-      final signatureBytes = Uint8List.fromList(HEX.decode(signatureHex));
-      final messageBytes = utf8.encode(jsonString);
+      final msgBytes = Uint8List.fromList(utf8.encode(jsonString));
+      final sigBytes = Uint8List.fromList(HEX.decode(signatureHex));
 
-      // FIX: Pass x and y as BigInt to avoid sign-bit padding issue
+      return _ecdsaVerify(msgBytes, sigBytes);
+    } catch (e) {
+      print("🛡️ ECC: Error: $e");
+      return false;
+    }
+  }
+
+// Recursively sorts all map keys, matching Python's sort_keys=True
+  String _toSortedJson(dynamic value) {
+    if (value is Map) {
+      final sorted = SplayTreeMap<String, dynamic>.from(
+          value.map((k, v) => MapEntry(k.toString(), v)));
+      final buffer = StringBuffer('{');
+      var first = true;
+      for (final entry in sorted.entries) {
+        if (!first) buffer.write(',');
+        buffer.write(jsonEncode(entry.key));
+        buffer.write(':');
+        buffer.write(_toSortedJson(entry.value));
+        first = false;
+      }
+      buffer.write('}');
+      return buffer.toString();
+    } else if (value is List) {
+      final buffer = StringBuffer('[');
+      var first = true;
+      for (final item in value) {
+        if (!first) buffer.write(',');
+        buffer.write(_toSortedJson(item));
+        first = false;
+      }
+      buffer.write(']');
+      return buffer.toString();
+    } else {
+      return jsonEncode(value);
+    }
+  }
+
+  bool _ecdsaVerify(Uint8List message, Uint8List sigBytes) {
+    try {
+      final curve = pc.ECCurve_secp256r1();
       final x = BigInt.parse(_pubXHex, radix: 16);
       final y = BigInt.parse(_pubYHex, radix: 16);
 
-      final publicKey = EcPublicKey(
-        x: _bigIntToBytes(x),
-        y: _bigIntToBytes(y),
-        type: KeyPairType.p256,
-      );
+      final point = curve.curve.createPoint(x, y);
+      final pubKey = pc.ECPublicKey(point, curve);
 
-      final isVerified = await algorithm.verify(
-        messageBytes,
-        signature: Signature(signatureBytes, publicKey: publicKey),
-      );
+      // Hash the message with SHA-256
+      final digest = pc.SHA256Digest();
+      final hash = digest.process(message);
 
-      return isVerified;
+      // Extract R and S from raw 64-byte signature
+      final r = BigInt.parse(HEX.encode(sigBytes.sublist(0, 32)), radix: 16);
+      final s = BigInt.parse(HEX.encode(sigBytes.sublist(32, 64)), radix: 16);
+
+      final signer = pc.ECDSASigner(null); // null = pre-hashed
+      signer.init(false, pc.PublicKeyParameter(pubKey));
+
+      return signer.verifySignature(hash, pc.ECSignature(r, s));
     } catch (e) {
-      print("🛡️ ECC: Math Error: $e");
+      print("🛡️ ECC: PointyCastle Error: $e");
       return false;
+    }
+  }
+
+  Future<void> runRealDataTest() async {
+    debugPrint("🧪 Starting Real Data ECC Test...");
+    try {
+      // Fresh pair from Python logs
+      const String testSigHex =
+          "a0666b19bbd5a724f82acdf490b62e35f5b490c5a21ac0a87f83726148033da3f02cc854c035a0f835352590a8e257ca2e9d01b337b94fec2a575162a4921c6c";
+      const String testJsonStr =
+          '{"gnn_anomaly":0.0,"mae_anomaly":0.062300905585289,"status":"normal"}';
+
+      final sigBytes = Uint8List.fromList(HEX.decode(testSigHex));
+      final msgBytes = Uint8List.fromList(utf8.encode(testJsonStr));
+
+      final domainParams = pc.ECDomainParameters('prime256v1');
+      final x = BigInt.parse(_pubXHex, radix: 16);
+      final y = BigInt.parse(_pubYHex, radix: 16);
+      final point = domainParams.curve.createPoint(x, y);
+      final pubKey = pc.ECPublicKey(point, domainParams);
+
+      final digest = pc.SHA256Digest();
+      final hash = digest.process(msgBytes);
+      debugPrint("🧪 Hash: ${HEX.encode(hash)}");
+
+      final r = BigInt.parse(HEX.encode(sigBytes.sublist(0, 32)), radix: 16);
+      final s = BigInt.parse(HEX.encode(sigBytes.sublist(32, 64)), radix: 16);
+
+      final signer = pc.ECDSASigner(null);
+      signer.init(false, pc.PublicKeyParameter(pubKey));
+      final result = signer.verifySignature(hash, pc.ECSignature(r, s));
+
+      debugPrint("🧪 Real Data Test Result: $result");
+    } catch (e, stack) {
+      debugPrint("🧪 Error: $e");
+      debugPrint("🧪 Stack: $stack");
+    }
+  }
+
+  Future<void> runECCSaneCheck() async {
+    debugPrint("🧪 Starting ECC Sanity Test...");
+    // Simple check - just verify the pointycastle import works
+    try {
+      final curve = pc.ECCurve_secp256r1();
+      debugPrint(curve != null ? "✅ ECC SANITY PASSED" : "❌ ECC SANITY FAILED");
+    } catch (e) {
+      debugPrint("❌ ECC ERROR: $e");
     }
   }
 

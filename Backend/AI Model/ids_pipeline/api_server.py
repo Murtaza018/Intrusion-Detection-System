@@ -79,6 +79,31 @@ class APIServer:
                     key_file.read(),
                     password=None, 
                 )
+
+            import json
+            test_data = {"gnn_anomaly":0,"mae_anomaly":0.054724205285310745,"status":"normal"}
+            json_str = json.dumps(test_data, sort_keys=True, separators=(',', ':'))
+            print(repr(json_str))
+
+            # In _generate_signature, add temporarily:
+            print(f"[TEST] JSON: {repr(json_str)}")     
+            
+            # P-256 field prime
+            q = 0xFFFFFFFF00000001000000000000000000000000FFFFFFFFFFFFFFFFFFFFFFFF
+
+            pub_numbers = self.private_key.public_key().public_numbers()
+            print(f"X: {hex(pub_numbers.x)}")
+            print(f"Y: {hex(pub_numbers.y)}")
+            print(f"X < q: {pub_numbers.x < q}")
+            print(f"Y < q: {pub_numbers.y < q}")
+            print(f"X hex padded: {pub_numbers.x.to_bytes(32, 'big').hex()}")
+            print(f"Y hex padded: {pub_numbers.y.to_bytes(32, 'big').hex()}") 
+
+            from cryptography.hazmat.primitives.asymmetric import ec
+            print(type(self.private_key.public_key().public_numbers()))
+            print(self.private_key.public_key().key_size)
+
+
             print(f"[*] ECC Security Layer: {key_path} loaded successfully.")
             pub_numbers = self.private_key.public_key().public_numbers()
             x_hex = pub_numbers.x.to_bytes(32, 'big').hex()
@@ -102,6 +127,11 @@ class APIServer:
         
         try:
             json_str = json.dumps(data_dict, sort_keys=True, separators=(',', ':'))
+            print(f"[TEST] JSON: {repr(json_str)}")
+
+            import hashlib
+            hash_hex = hashlib.sha256(json_str.encode('utf-8')).hexdigest()
+            print(f"[TEST] Hash: {hash_hex}")
             
             signature_der = self.private_key.sign(
                 json_str.encode(),
@@ -197,6 +227,17 @@ class APIServer:
             status = request.args.get('status', default=None, type=str)
             
             packets = self.packet_storage.get_packets(limit=limit, offset=offset, status_filter=status)
+            
+            # Normalize numeric types so signature matches Flutter's JSON parsing
+            for p in packets:
+                p['confidence'] = float(p.get('confidence', 0.0))
+                if 'explanation' in p and isinstance(p['explanation'], dict):
+                    exp = p['explanation']
+                    if 'gnn_anomaly' in exp:
+                        exp['gnn_anomaly'] = float(exp.get('gnn_anomaly', 0.0))
+                    if 'mae_anomaly' in exp:
+                        exp['mae_anomaly'] = float(exp.get('mae_anomaly', 0.0))
+            
             data = {
                 "packets": packets,
                 "count": len(packets),

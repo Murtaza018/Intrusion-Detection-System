@@ -86,7 +86,7 @@ class APIServer:
             print(repr(json_str))
 
             # In _generate_signature, add temporarily:
-            print(f"[TEST] JSON: {repr(json_str)}")     
+            # print(f"[TEST] JSON: {repr(json_str)}")     
             
             # P-256 field prime
             q = 0xFFFFFFFF00000001000000000000000000000000FFFFFFFFFFFFFFFFFFFFFFFF
@@ -127,7 +127,7 @@ class APIServer:
         
         try:
             json_str = json.dumps(data_dict, sort_keys=True, separators=(',', ':'))
-            print(f"[TEST] JSON: {repr(json_str)}")
+            # print(f"[TEST] JSON: {repr(json_str)}")
 
             import hashlib
             hash_hex = hashlib.sha256(json_str.encode('utf-8')).hexdigest()
@@ -230,14 +230,13 @@ class APIServer:
             
             # Normalize numeric types so signature matches Flutter's JSON parsing
             for p in packets:
-                p['confidence'] = float(p.get('confidence', 0.0))
+                p['confidence'] = round(float(p.get('confidence', 0.0)), 4)
                 if 'explanation' in p and isinstance(p['explanation'], dict):
                     exp = p['explanation']
                     if 'gnn_anomaly' in exp:
-                        exp['gnn_anomaly'] = float(exp.get('gnn_anomaly', 0.0))
+                        exp['gnn_anomaly'] = round(float(exp.get('gnn_anomaly', 0.0)), 4)
                     if 'mae_anomaly' in exp:
-                        exp['mae_anomaly'] = float(exp.get('mae_anomaly', 0.0))
-            
+                        exp['mae_anomaly'] = round(float(exp.get('mae_anomaly', 0.0)), 4)
             data = {
                 "packets": packets,
                 "count": len(packets),
@@ -251,9 +250,10 @@ class APIServer:
             if recent:
                 p = recent[0]
                 expl = p.get('explanation', {})
+                # Round the sensory values to 4 decimal places
                 data = {
-                    "gnn_anomaly": expl.get('gnn_anomaly', 0.0),
-                    "mae_anomaly": expl.get('mae_anomaly', 0.0),
+                    "gnn_anomaly": round(float(expl.get('gnn_anomaly', 0.0)), 4),
+                    "mae_anomaly": round(float(expl.get('mae_anomaly', 0.0)), 4),
                     "status": p.get('status', 'unknown'),
                 }
                 return self._secure_response(data)

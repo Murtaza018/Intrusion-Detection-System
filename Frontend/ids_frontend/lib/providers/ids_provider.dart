@@ -8,6 +8,8 @@ import 'package:cryptography/cryptography.dart';
 import 'package:hex/hex.dart'; // Ensure you added 'hex: ^0.2.0' to pubspec.yaml
 import 'package:pointycastle/export.dart' as pc;
 import 'package:pointycastle/ecc/curves/secp256r1.dart';
+import 'package:crypto/crypto.dart';
+import 'dart:convert';
 
 // --- Packet Data Model ---
 class Packet {
@@ -360,23 +362,48 @@ class IdsProvider with ChangeNotifier {
 
   Future<bool> _verifyServerSignature(Map<String, dynamic> responseBody) async {
     final String? signatureHex = responseBody['signature'];
+
+    // Extract ONLY the payload. Do not include server_time or signature_type!
     final dynamic payload = responseBody['payload'];
 
     if (signatureHex == null || payload == null) return false;
 
     try {
-      final jsonString = _toSortedJson(payload);
-      print(
-          "🛡️ ECC: JSON preview: ${jsonString.substring(0, jsonString.length.clamp(0, 100))}");
+      // Match Python: sort_keys=True, separators=(',', ':')
+      // jsonEncode in Dart defaults to no spaces (',',':') which matches Python's separators
+      final sortedPayload = _toSortedMap(payload);
+      final jsonString = jsonEncode(sortedPayload);
 
-      final msgBytes = Uint8List.fromList(utf8.encode(jsonString));
+      // Calculate hash for debugging
+      final msgBytes = utf8.encode(jsonString);
+      final localHash = sha256.convert(msgBytes);
+
+      // print("🛡️ ECC: JSON to Verify: $jsonString");
+      print("🛡️ ECC: Local Hash: $localHash");
+
       final sigBytes = Uint8List.fromList(HEX.decode(signatureHex));
 
-      return _ecdsaVerify(msgBytes, sigBytes);
+      // Pass the raw bytes of the JSON string to your verification function
+      return _ecdsaVerify(Uint8List.fromList(msgBytes), sigBytes);
     } catch (e) {
       print("🛡️ ECC: Error: $e");
       return false;
     }
+  }
+
+// Helper to ensure keys are sorted alphabetically (matching Python's sort_keys=True)
+  dynamic _toSortedMap(dynamic item) {
+    if (item is Map) {
+      final sortedKeys = item.keys.toList()..sort();
+      final result = <String, dynamic>{};
+      for (var key in sortedKeys) {
+        result[key] = _toSortedMap(item[key]);
+      }
+      return result;
+    } else if (item is List) {
+      return item.map((e) => _toSortedMap(e)).toList();
+    }
+    return item;
   }
 
 // Recursively sorts all map keys, matching Python's sort_keys=True
@@ -412,25 +439,41 @@ class IdsProvider with ChangeNotifier {
 
   bool _ecdsaVerify(Uint8List message, Uint8List sigBytes) {
     try {
-      final curve = pc.ECCurve_secp256r1();
+      // 1. Setup Curve (P-256)
+      // PointyCastle uses 'prime256v1' for the SECP256R1 curve
+      final domainParams = pc.ECDomainParameters('prime256v1');
       final x = BigInt.parse(_pubXHex, radix: 16);
       final y = BigInt.parse(_pubYHex, radix: 16);
 
-      final point = curve.curve.createPoint(x, y);
-      final pubKey = pc.ECPublicKey(point, curve);
+      final point = domainParams.curve.createPoint(x, y);
+      final pubKey = pc.ECPublicKey(point, domainParams);
 
-      // Hash the message with SHA-256
+      // 2. Hash the message exactly once
       final digest = pc.SHA256Digest();
       final hash = digest.process(message);
 
-      // Extract R and S from raw 64-byte signature
+      // 3. Extract R and S (Big-endian 32-bytes each)
       final r = BigInt.parse(HEX.encode(sigBytes.sublist(0, 32)), radix: 16);
-      final s = BigInt.parse(HEX.encode(sigBytes.sublist(32, 64)), radix: 16);
+      BigInt s = BigInt.parse(HEX.encode(sigBytes.sublist(32, 64)), radix: 16);
 
-      final signer = pc.ECDSASigner(null); // null = pre-hashed
+      // 4. Normalize S value (Malleability Check)
+      // Python's cryptography library often enforces Low-S signatures
+      if (s > (domainParams.n >> 1)) {
+        s = domainParams.n - s;
+      }
+      final ecSig = pc.ECSignature(r, s);
+
+      // 5. Initialize Signer
+      // We pass null for the digest algorithm because we are passing the
+      // pre-computed 'hash' directly to verifySignature.
+      final signer = pc.ECDSASigner(null, pc.HMac(pc.SHA256Digest(), 64));
       signer.init(false, pc.PublicKeyParameter(pubKey));
 
-      return signer.verifySignature(hash, pc.ECSignature(r, s));
+      // 6. Verify against the pre-calculated hash
+      final isValid = signer.verifySignature(hash, ecSig);
+      print("🛡️ ECC: Internal PointyCastle result: $isValid");
+
+      return isValid;
     } catch (e) {
       print("🛡️ ECC: PointyCastle Error: $e");
       return false;

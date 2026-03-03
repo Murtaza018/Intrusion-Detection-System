@@ -316,8 +316,11 @@ class IdsProvider with ChangeNotifier {
       final data = jsonDecode(utf8.decode(response.bodyBytes));
       if (response.statusCode == 200 && await _verifyServerSignature(data)) {
         final payload = data['payload'];
-        _liveGnnAnomaly = (payload['gnn_anomaly'] ?? 0.0).toDouble();
-        _liveMaeAnomaly = (payload['mae_anomaly'] ?? 0.0).toDouble();
+        // Convert the String from the backend back into a Double for the UI
+        _liveGnnAnomaly =
+            double.tryParse(payload['gnn_anomaly']?.toString() ?? '0.0') ?? 0.0;
+        _liveMaeAnomaly =
+            double.tryParse(payload['mae_anomaly']?.toString() ?? '0.0') ?? 0.0;
         _liveStatus = payload['status'] ?? 'unknown';
         notifyListeners();
       }
@@ -348,8 +351,30 @@ class IdsProvider with ChangeNotifier {
 
         if (result['success'] == true) {
           final List packets = result['packets'];
-          // Update local list...
-          notifyListeners();
+          if (result['success'] == true) {
+            final List packets = result['packets'];
+
+            for (var packetData in packets) {
+              if (packetData['confidence'] is String) {
+                packetData['confidence'] = double.tryParse(
+                        packetData['confidence']?.toString() ?? '0.0') ??
+                    0.0;
+              }
+
+              if (packetData['explanation'] != null) {
+                var exp = packetData['explanation'];
+
+                exp['gnn_anomaly'] =
+                    double.tryParse(exp['gnn_anomaly'].toString()) ?? 0.0;
+                exp['mae_anomaly'] =
+                    double.tryParse(exp['mae_anomaly'].toString()) ?? 0.0;
+              }
+              // -----------------------
+
+              _addPacketFromApi(packetData);
+            }
+            notifyListeners();
+          }
         }
       }
     } catch (e) {
@@ -362,7 +387,7 @@ class IdsProvider with ChangeNotifier {
   Future<Map<String, dynamic>> _verifyAndParseInBackground(
       Map<String, dynamic> params) async {
     try {
-      // 1. Decode UTF8 and JSON in the background (Prevents Lag)
+      // 1. Decode UTF8 and JSON in the background
       final String rawBody = utf8.decode(params['bodyBytes']);
       final Map<String, dynamic> data = jsonDecode(rawBody);
 
@@ -371,10 +396,21 @@ class IdsProvider with ChangeNotifier {
 
       if (signatureHex == null || payload == null) return {'success': false};
 
-      // 2. ECC Verification logic (using the logic we perfected)
-      final msgBytes =
-          Uint8List.fromList(utf8.encode(jsonEncode(_toSortedMap(payload))));
+      // 2. ECC Verification logic
+      // Create the string variable first so you can use it for the debug print
+      final dynamic sortedPayload = _toSortedMap(payload);
+      final String jsonString = jsonEncode(sortedPayload);
+
+      final msgBytes = Uint8List.fromList(utf8.encode(jsonString));
       final sigBytes = Uint8List.fromList(HEX.decode(signatureHex));
+
+      // --- ECC DEBUG START ---
+      // print("--- ECC DEBUG START ---");
+      // print("RAW BYTES TO VERIFY (HEX): ${HEX.encode(msgBytes)}");
+      // print(
+      //     "FIRST 50 CHARS: ${jsonString.substring(0, jsonString.length.clamp(0, 50))}");
+      // print("--- ECC DEBUG END ---");
+      // --- ECC DEBUG END ---
 
       bool isValid =
           _ecdsaVerifyRaw(msgBytes, sigBytes, params['pubX'], params['pubY']);
@@ -384,6 +420,8 @@ class IdsProvider with ChangeNotifier {
         'packets': isValid ? payload['packets'] : [],
       };
     } catch (e) {
+      print(
+          "🛡️ ECC Isolate Error: $e"); // Added print to catch errors like missing variables
       return {'success': false};
     }
   }

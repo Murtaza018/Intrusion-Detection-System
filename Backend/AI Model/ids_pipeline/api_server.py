@@ -126,20 +126,20 @@ class APIServer:
             return "NO_KEY_LOADED"
         
         try:
-            json_str = json.dumps(data_dict, sort_keys=True, separators=(',', ':'))
+            json_str = json.dumps(data_dict, sort_keys=True, separators=(',', ':'),ensure_ascii=False)
             # print(f"[TEST] JSON: {repr(json_str)}")
 
-            print(f"--- ECC DEBUG START ---")
-            print(f"RAW BYTES TO SIGN (HEX): {json_str.encode().hex()}")
-            print(f"FIRST 50 CHARS: {json_str[:50]}")
-            print(f"--- ECC DEBUG END ---")
+            # print(f"--- ECC DEBUG START ---")
+            # print(f"RAW BYTES TO SIGN (HEX): {json_str.encode().hex()}")
+            # print(f"FIRST 50 CHARS: {json_str[:50]}")
+            # print(f"--- ECC DEBUG END ---")
 
             import hashlib
             hash_hex = hashlib.sha256(json_str.encode('utf-8')).hexdigest()
             print(f"[TEST] Hash: {hash_hex}")
             
             signature_der = self.private_key.sign(
-                json_str.encode(),
+                json_str.encode('utf-8'),
                 ec.ECDSA(hashes.SHA256())
             )
             
@@ -234,14 +234,16 @@ class APIServer:
             packets = self.packet_storage.get_packets(limit=limit, offset=offset, status_filter=status)
             
             # Normalize numeric types so signature matches Flutter's JSON parsing
+            # Inside api_server.py
             for p in packets:
-                p['confidence'] = round(float(p.get('confidence', 0.0)), 4)
+                # Convert numbers to strings with fixed precision
+                p['confidence'] = "{:.4f}".format(float(p.get('confidence', 0.0)))
                 if 'explanation' in p and isinstance(p['explanation'], dict):
                     exp = p['explanation']
                     if 'gnn_anomaly' in exp:
-                        exp['gnn_anomaly'] = round(float(exp.get('gnn_anomaly', 0.0)), 4)
+                        exp['gnn_anomaly'] = "{:.4f}".format(float(exp.get('gnn_anomaly', 0.0)))
                     if 'mae_anomaly' in exp:
-                        exp['mae_anomaly'] = round(float(exp.get('mae_anomaly', 0.0)), 4)
+                        exp['mae_anomaly'] = "{:.4f}".format(float(exp.get('mae_anomaly', 0.0)))
             data = {
                 "packets": packets,
                 "count": len(packets),
@@ -257,8 +259,8 @@ class APIServer:
                 expl = p.get('explanation', {})
                 # Round the sensory values to 4 decimal places
                 data = {
-                    "gnn_anomaly": round(float(expl.get('gnn_anomaly', 0.0)), 4),
-                    "mae_anomaly": round(float(expl.get('mae_anomaly', 0.0)), 4),
+                    "gnn_anomaly": "{:.4f}".format(float(expl.get('gnn_anomaly', 0.0))),
+                    "mae_anomaly": "{:.4f}".format(float(expl.get('mae_anomaly', 0.0))),
                     "status": p.get('status', 'unknown'),
                 }
                 return self._secure_response(data)

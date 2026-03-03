@@ -129,6 +129,11 @@ class APIServer:
             json_str = json.dumps(data_dict, sort_keys=True, separators=(',', ':'))
             # print(f"[TEST] JSON: {repr(json_str)}")
 
+            print(f"--- ECC DEBUG START ---")
+            print(f"RAW BYTES TO SIGN (HEX): {json_str.encode().hex()}")
+            print(f"FIRST 50 CHARS: {json_str[:50]}")
+            print(f"--- ECC DEBUG END ---")
+
             import hashlib
             hash_hex = hashlib.sha256(json_str.encode('utf-8')).hexdigest()
             print(f"[TEST] Hash: {hash_hex}")

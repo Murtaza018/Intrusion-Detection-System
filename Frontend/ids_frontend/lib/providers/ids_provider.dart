@@ -326,37 +326,65 @@ class IdsProvider with ChangeNotifier {
     }
   }
 
+  bool _isProcessing = false; // Add this class variable
+
   Future<void> _fetchRecentPackets() async {
-    print("📡 Network: Fetching packets...");
+    if (_isProcessing) return; // Skip if we are already busy verifying
+    _isProcessing = true;
+
     try {
       final response = await http.get(
           Uri.parse('$BASE_URL/api/packets/recent?limit=100'),
           headers: headers);
 
-      print("📡 Network: Status Code ${response.statusCode}");
+      if (response.statusCode == 200) {
+        // 1. SEND RAW BYTES TO ISOLATE IMMEDIATELY
+        // This stops the UI from lagging because jsonDecode happens in the background
+        final result = await compute(_verifyAndParseInBackground, {
+          'bodyBytes': response.bodyBytes,
+          'pubX': _pubXHex,
+          'pubY': _pubYHex,
+        });
 
-      if (response.statusCode == 401) {
-        print("❌ SECURITY: API Key Rejected by Server!");
-        return;
-      }
-
-      // FIX: use bodyBytes to avoid encoding truncation
-      final rawBody = utf8.decode(response.bodyBytes);
-      final data = jsonDecode(rawBody);
-      print("📡 Network: Received Body Keys: ${data.keys.toList()}");
-
-      bool isSecure = await _verifyServerSignature(data);
-      print("🛡️ ECC: Signature Valid? $isSecure");
-
-      if (response.statusCode == 200 && isSecure) {
-        final List packets = data['payload']['packets'];
-        print("📦 Data: Found ${packets.length} packets in payload.");
-        for (var packetData in packets) {
-          _addPacketFromApi(packetData);
+        if (result['success'] == true) {
+          final List packets = result['packets'];
+          // Update local list...
+          notifyListeners();
         }
       }
     } catch (e) {
-      print("🚨 CRITICAL ERROR in Fetch: $e");
+      print("🚨 Fetch Error: $e");
+    } finally {
+      _isProcessing = false; // Release the lock
+    }
+  }
+
+  Future<Map<String, dynamic>> _verifyAndParseInBackground(
+      Map<String, dynamic> params) async {
+    try {
+      // 1. Decode UTF8 and JSON in the background (Prevents Lag)
+      final String rawBody = utf8.decode(params['bodyBytes']);
+      final Map<String, dynamic> data = jsonDecode(rawBody);
+
+      final String? signatureHex = data['signature'];
+      final Map<String, dynamic>? payload = data['payload'];
+
+      if (signatureHex == null || payload == null) return {'success': false};
+
+      // 2. ECC Verification logic (using the logic we perfected)
+      final msgBytes =
+          Uint8List.fromList(utf8.encode(jsonEncode(_toSortedMap(payload))));
+      final sigBytes = Uint8List.fromList(HEX.decode(signatureHex));
+
+      bool isValid =
+          _ecdsaVerifyRaw(msgBytes, sigBytes, params['pubX'], params['pubY']);
+
+      return {
+        'success': isValid,
+        'packets': isValid ? payload['packets'] : [],
+      };
+    } catch (e) {
+      return {'success': false};
     }
   }
 
@@ -476,6 +504,76 @@ class IdsProvider with ChangeNotifier {
       return isValid;
     } catch (e) {
       print("🛡️ ECC: PointyCastle Error: $e");
+      return false;
+    }
+  }
+
+  Future<bool> _verifyInBackground(Map<String, dynamic> params) async {
+    final responseBody = params['responseBody'];
+    final String pubX = params['pubX'];
+    final String pubY = params['pubY'];
+
+    final String? signatureHex = responseBody['signature'];
+    final dynamic payload = responseBody['payload'];
+
+    if (signatureHex == null || payload == null) return false;
+
+    try {
+      final sortedPayload = _toSortedMap(payload);
+      final jsonString = jsonEncode(sortedPayload);
+      final msgBytes = Uint8List.fromList(utf8.encode(jsonString));
+
+      print("--- ECC DEBUG START ---");
+      print("RAW BYTES TO VERIFY (HEX): ${HEX.encode(msgBytes)}");
+      print("FIRST 50 CHARS: ${jsonString.substring(0, 50)}");
+      print("--- ECC DEBUG END ---");
+
+      // FIX: Decode the hex string into Uint8List here
+      final sigBytes = Uint8List.fromList(HEX.decode(signatureHex));
+
+      // Now pass sigBytes (Uint8List) instead of signatureHex (String)
+      return _ecdsaVerifyRaw(msgBytes, sigBytes, pubX, pubY);
+    } catch (e) {
+      print("🛡️ ECC Isolate Error: $e");
+      return false;
+    }
+  }
+
+  bool _ecdsaVerifyRaw(
+      Uint8List message, Uint8List sigBytes, String pubXHex, String pubYHex) {
+    try {
+      final domainParams = pc.ECDomainParameters('prime256v1');
+      final x = BigInt.parse(pubXHex, radix: 16);
+      final y = BigInt.parse(pubYHex, radix: 16);
+
+      final point = domainParams.curve.createPoint(x, y);
+      final pubKey = pc.ECPublicKey(point, domainParams);
+
+      // 1. Get the hash bytes directly from the SHA256 library
+      final hash = sha256.convert(message).bytes;
+
+      // 2. Extract R and S
+      final r = BigInt.parse(HEX.encode(sigBytes.sublist(0, 32)), radix: 16);
+      BigInt s = BigInt.parse(HEX.encode(sigBytes.sublist(32, 64)), radix: 16);
+
+      // 3. Normalization (Low-S) is CRITICAL for Python compatibility
+      if (s > (domainParams.n >> 1)) {
+        s = domainParams.n - s;
+      }
+
+      // 4. Use a FRESH signer instance every time
+      // We pass null for the digest because we are providing the 'hash' (the digest) ourselves
+      final signer = pc.ECDSASigner(null, pc.HMac(pc.SHA256Digest(), 64));
+      signer.init(false, pc.PublicKeyParameter(pubKey));
+
+      // 5. Explicitly cast hash to Uint8List to avoid any List<int> vs Uint8List confusion
+      final result = signer.verifySignature(
+          Uint8List.fromList(hash), pc.ECSignature(r, s));
+
+      print("🛡️ ECC Isolate: Internal Math Result: $result");
+      return result;
+    } catch (e) {
+      print("🛡️ ECC Isolate: PointyCastle Math Error: $e");
       return false;
     }
   }

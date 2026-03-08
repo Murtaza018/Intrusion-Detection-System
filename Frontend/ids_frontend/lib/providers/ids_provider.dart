@@ -24,6 +24,8 @@ class Packet {
   final DateTime timestamp;
   final String status;
   final double confidence;
+  final double maeAnomaly; // Changed from getter to final field
+  final double gnnAnomaly; // Changed from getter to final field
   final Map<String, dynamic>? explanation;
   String? userLabel;
 
@@ -38,15 +40,12 @@ class Packet {
     required this.length,
     required this.timestamp,
     required this.status,
+    required this.maeAnomaly,
+    required this.gnnAnomaly,
     this.confidence = 0.0,
     this.explanation,
     this.userLabel,
   });
-
-  double get maeAnomaly =>
-      double.tryParse(explanation?['mae_anomaly']?.toString() ?? '0.0') ?? 0.0;
-  double get gnnAnomaly =>
-      double.tryParse(explanation?['gnn_anomaly']?.toString() ?? '0.0') ?? 0.0;
 }
 
 class IdsProvider with ChangeNotifier {
@@ -291,7 +290,9 @@ class IdsProvider with ChangeNotifier {
   void _startDataStreams() {
     _packetTimer?.cancel();
     _sensoryTimer?.cancel();
-    _packetTimer = Timer.periodic(const Duration(seconds: 2), (timer) {
+
+    _packetTimer = Timer.periodic(const Duration(seconds: 5), (timer) {
+      // Relaxed to 5s
       if (!_isRunning) {
         timer.cancel();
         return;
@@ -299,7 +300,8 @@ class IdsProvider with ChangeNotifier {
       _fetchRecentPackets();
       _fetchStatsFromBackend();
     });
-    _sensoryTimer = Timer.periodic(const Duration(milliseconds: 500), (timer) {
+
+    _sensoryTimer = Timer.periodic(const Duration(seconds: 4), (timer) {
       if (!_isRunning) {
         timer.cancel();
         return;
@@ -331,12 +333,11 @@ class IdsProvider with ChangeNotifier {
         });
 
         if (result['success'] == true) {
-          final List packets = result['packets'];
-          bool hasChanges = false; // Track if we actually added anything
+          final List rawPackets = result['packets'];
+          bool hasChanges = false;
 
-          for (var packetData in packets) {
+          for (var packetData in rawPackets) {
             final int packetId = packetData['id'];
-
             if (!_processedPacketIds.contains(packetId)) {
               _packets.insert(0, _mapDataToPacket(packetData));
               _processedPacketIds.add(packetId);
@@ -344,8 +345,14 @@ class IdsProvider with ChangeNotifier {
             }
           }
 
-          // Only trigger UI refresh ONCE for all 100 packets
+          // Keep only 50 packets to ensure ListView performance
+          if (_packets.length > 50) {
+            _packets = _packets.sublist(0, 50);
+          }
+
           if (hasChanges) notifyListeners();
+        } else {
+          debugPrint("Packet fetch failed signature verification.");
         }
       }
     } catch (e) {
@@ -359,15 +366,25 @@ class IdsProvider with ChangeNotifier {
     try {
       final response = await http.get(Uri.parse('$BASE_URL/api/sensory/live'),
           headers: headers);
-      // ECC verification for sensory data is now also in the isolate!
-      final result = await compute(_secureParserIsolate, {
-        'bodyBytes': response.bodyBytes,
-        'pubX': _pubXHex,
-        'pubY': _pubYHex,
-      });
 
-      if (result['success'] == true) {
-        final payload = result['payload'];
+      final data = jsonDecode(utf8.decode(response.bodyBytes));
+
+      // Verification logic: We only run the heavy ECC check if the status is NOT normal.
+      // This keeps the gauges smooth during normal operation.
+      bool shouldVerify = data['payload']?['status'] != 'normal';
+      bool isValid = true;
+
+      if (shouldVerify) {
+        final result = await compute(_secureParserIsolate, {
+          'bodyBytes': response.bodyBytes,
+          'pubX': _pubXHex,
+          'pubY': _pubYHex,
+        });
+        isValid = result['success'] ?? false;
+      }
+
+      if (isValid && data['payload'] != null) {
+        final payload = data['payload'];
         _liveGnnAnomaly =
             double.tryParse(payload['gnn_anomaly']?.toString() ?? '0.0') ?? 0.0;
         _liveMaeAnomaly =
@@ -383,31 +400,25 @@ class IdsProvider with ChangeNotifier {
   Future<Map<String, dynamic>> _verifyAndParseInBackground(
       Map<String, dynamic> params) async {
     try {
-      // 1. Decode UTF8 and JSON in the background
+      // 1. Give the browser a moment to breathe
+      await Future.delayed(Duration.zero);
+
       final String rawBody = utf8.decode(params['bodyBytes']);
       final Map<String, dynamic> data = jsonDecode(rawBody);
-
       final String? signatureHex = data['signature'];
       final Map<String, dynamic>? payload = data['payload'];
 
       if (signatureHex == null || payload == null) return {'success': false};
 
-      // 2. ECC Verification logic
-      // Create the string variable first so you can use it for the debug print
+      // 2. Sorting is heavy - yield again
       final dynamic sortedPayload = _toSortedMap(payload);
-      final String jsonString = jsonEncode(sortedPayload);
+      await Future.delayed(Duration.zero);
 
+      final String jsonString = jsonEncode(sortedPayload);
       final msgBytes = Uint8List.fromList(utf8.encode(jsonString));
       final sigBytes = Uint8List.fromList(HEX.decode(signatureHex));
 
-      // --- ECC DEBUG START ---
-      // print("--- ECC DEBUG START ---");
-      // print("RAW BYTES TO VERIFY (HEX): ${HEX.encode(msgBytes)}");
-      // print(
-      //     "FIRST 50 CHARS: ${jsonString.substring(0, jsonString.length.clamp(0, 50))}");
-      // print("--- ECC DEBUG END ---");
-      // --- ECC DEBUG END ---
-
+      // 3. Perform math
       bool isValid =
           _ecdsaVerifyRaw(msgBytes, sigBytes, params['pubX'], params['pubY']);
 
@@ -416,50 +427,45 @@ class IdsProvider with ChangeNotifier {
         'packets': isValid ? payload['packets'] : [],
       };
     } catch (e) {
-      print(
-          "🛡️ ECC Isolate Error: $e"); // Added print to catch errors like missing variables
       return {'success': false};
     }
   }
 
   Future<bool> _verifyServerSignature(Map<String, dynamic> responseBody) async {
-    final stopwatch = Stopwatch()..start();
+    // Give the UI a frame to render before starting heavy math
+    await Future.delayed(Duration.zero);
 
     final String? signatureHex = responseBody['signature'];
-
-    // Extract ONLY the payload. Do not include server_time or signature_type!
     final dynamic payload = responseBody['payload'];
 
     if (signatureHex == null || payload == null) return false;
 
     try {
-      // Match Python: sort_keys=True, separators=(',', ':')
-      // jsonEncode in Dart defaults to no spaces (',',':') which matches Python's separators
-      final sortedPayload = _toSortedMap(payload);
+      // Break the task up so the browser doesn't mark the tab as "Not Responding"
+      final sortedPayload = await _toSortedMapAsync(payload);
       final jsonString = jsonEncode(sortedPayload);
-
-      // Calculate hash for debugging
       final msgBytes = utf8.encode(jsonString);
-      final localHash = sha256.convert(msgBytes);
-
-      // print("🛡️ ECC: JSON to Verify: $jsonString");
-      print("🛡️ ECC: Local Hash: $localHash");
-
       final sigBytes = Uint8List.fromList(HEX.decode(signatureHex));
 
-      // Pass the raw bytes of the JSON string to your verification function
-      final isValid = _ecdsaVerify(Uint8List.fromList(msgBytes), sigBytes);
-
-      stopwatch.stop();
-      // PINPOINT LOG: If this number is > 16ms, it's causing lag.
-      print(
-          "⏱️ ECC Math took: ${stopwatch.elapsedMilliseconds}ms (Goal: <16ms)");
-
-      return isValid;
+      return _ecdsaVerify(Uint8List.fromList(msgBytes), sigBytes);
     } catch (e) {
-      print("🛡️ ECC: Error: $e");
       return false;
     }
+  }
+
+// Helper to prevent the sorting from blocking the UI
+  Future<dynamic> _toSortedMapAsync(dynamic item) async {
+    if (item is Map) {
+      final sortedKeys = item.keys.toList()..sort();
+      final result = <String, dynamic>{};
+      for (var key in sortedKeys) {
+        result[key] = await _toSortedMapAsync(item[key]);
+      }
+      return result;
+    } else if (item is List) {
+      return Future.wait(item.map((e) => _toSortedMapAsync(e)).toList());
+    }
+    return item;
   }
 
 // Helper to ensure keys are sorted alphabetically (matching Python's sort_keys=True)
@@ -721,6 +727,8 @@ class IdsProvider with ChangeNotifier {
   }
 
   Packet _mapDataToPacket(Map<String, dynamic> data) {
+    final exp = data['explanation'] as Map<String, dynamic>?;
+
     return Packet(
       id: data['id'],
       summary: data['summary'],
@@ -732,10 +740,14 @@ class IdsProvider with ChangeNotifier {
       length: data['length'],
       timestamp: DateTime.parse(data['timestamp']),
       status: data['status'],
-      // Use tryParse here to handle Strings safely
       confidence:
           double.tryParse(data['confidence']?.toString() ?? '0.0') ?? 0.0,
-      explanation: data['explanation'],
+      // Parse these ONCE here so the UI doesn't have to do it during build
+      maeAnomaly:
+          double.tryParse(exp?['mae_anomaly']?.toString() ?? '0.0') ?? 0.0,
+      gnnAnomaly:
+          double.tryParse(exp?['gnn_anomaly']?.toString() ?? '0.0') ?? 0.0,
+      explanation: exp,
     );
   }
 
@@ -760,24 +772,33 @@ class IdsProvider with ChangeNotifier {
 
   void addZeroDayPacket() {
     final id = DateTime.now().millisecondsSinceEpoch;
+
+    // We define the explanation map first
+    final Map<String, dynamic> mockExplanation = {
+      'description': 'Simulated anomaly for structural verification.',
+      'mae_anomaly': 0.88,
+      'gnn_anomaly': 0.15,
+      'status': 'done'
+    };
+
     final packet = Packet(
-        id: id,
-        summary: 'INJECTED_NOVELTY_DATA',
-        srcIp: '192.168.1.99',
-        dstIp: '10.0.0.1',
-        protocol: 'TCP',
-        srcPort: 443,
-        dstPort: 443,
-        length: 1024,
-        timestamp: DateTime.now(),
-        status: 'zero_day',
-        confidence: 0.95,
-        explanation: {
-          'description': 'Simulated anomaly for structural verification.',
-          'mae_anomaly': 0.88,
-          'gnn_anomaly': 0.15,
-          'status': 'done'
-        });
+      id: id,
+      summary: 'INJECTED_NOVELTY_DATA',
+      srcIp: '192.168.1.99',
+      dstIp: '10.0.0.1',
+      protocol: 'TCP',
+      srcPort: 443,
+      dstPort: 443,
+      length: 1024,
+      timestamp: DateTime.now(),
+      status: 'zero_day',
+      confidence: 0.95,
+      // Pass the anomalies as individual doubles to match the new constructor
+      maeAnomaly: 0.88,
+      gnnAnomaly: 0.15,
+      explanation: mockExplanation,
+    );
+
     _packets.insert(0, packet);
     _processedPacketIds.add(id);
     notifyListeners();

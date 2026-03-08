@@ -43,8 +43,10 @@ class Packet {
     this.userLabel,
   });
 
-  double get maeAnomaly => explanation?['mae_anomaly'] ?? 0.0;
-  double get gnnAnomaly => explanation?['gnn_anomaly'] ?? 0.0;
+  double get maeAnomaly =>
+      double.tryParse(explanation?['mae_anomaly']?.toString() ?? '0.0') ?? 0.0;
+  double get gnnAnomaly =>
+      double.tryParse(explanation?['gnn_anomaly']?.toString() ?? '0.0') ?? 0.0;
 }
 
 class IdsProvider with ChangeNotifier {
@@ -308,15 +310,64 @@ class IdsProvider with ChangeNotifier {
 
   // --- 10. FETCHERS & UTILS ---
 
+  bool _isProcessing = false; // Add this class variable
+
+// --- 2. UPDATED PROVIDER METHODS ---
+
+  Future<void> _fetchRecentPackets() async {
+    if (_isProcessing) return;
+    _isProcessing = true;
+
+    try {
+      final response = await http.get(
+          Uri.parse('$BASE_URL/api/packets/recent?limit=100'),
+          headers: headers);
+
+      if (response.statusCode == 200) {
+        final result = await compute(_verifyAndParseInBackground, {
+          'bodyBytes': response.bodyBytes,
+          'pubX': _pubXHex,
+          'pubY': _pubYHex,
+        });
+
+        if (result['success'] == true) {
+          final List packets = result['packets'];
+          bool hasChanges = false; // Track if we actually added anything
+
+          for (var packetData in packets) {
+            final int packetId = packetData['id'];
+
+            if (!_processedPacketIds.contains(packetId)) {
+              _packets.insert(0, _mapDataToPacket(packetData));
+              _processedPacketIds.add(packetId);
+              hasChanges = true;
+            }
+          }
+
+          // Only trigger UI refresh ONCE for all 100 packets
+          if (hasChanges) notifyListeners();
+        }
+      }
+    } catch (e) {
+      print("🚨 Fetch Error: $e");
+    } finally {
+      _isProcessing = false;
+    }
+  }
+
   Future<void> _fetchLiveSensoryData() async {
     try {
       final response = await http.get(Uri.parse('$BASE_URL/api/sensory/live'),
           headers: headers);
-      // FIX: use bodyBytes
-      final data = jsonDecode(utf8.decode(response.bodyBytes));
-      if (response.statusCode == 200 && await _verifyServerSignature(data)) {
-        final payload = data['payload'];
-        // Convert the String from the backend back into a Double for the UI
+      // ECC verification for sensory data is now also in the isolate!
+      final result = await compute(_secureParserIsolate, {
+        'bodyBytes': response.bodyBytes,
+        'pubX': _pubXHex,
+        'pubY': _pubYHex,
+      });
+
+      if (result['success'] == true) {
+        final payload = result['payload'];
         _liveGnnAnomaly =
             double.tryParse(payload['gnn_anomaly']?.toString() ?? '0.0') ?? 0.0;
         _liveMaeAnomaly =
@@ -326,61 +377,6 @@ class IdsProvider with ChangeNotifier {
       }
     } catch (e) {
       debugPrint('Sensory error: $e');
-    }
-  }
-
-  bool _isProcessing = false; // Add this class variable
-
-  Future<void> _fetchRecentPackets() async {
-    if (_isProcessing) return; // Skip if we are already busy verifying
-    _isProcessing = true;
-
-    try {
-      final response = await http.get(
-          Uri.parse('$BASE_URL/api/packets/recent?limit=100'),
-          headers: headers);
-
-      if (response.statusCode == 200) {
-        // 1. SEND RAW BYTES TO ISOLATE IMMEDIATELY
-        // This stops the UI from lagging because jsonDecode happens in the background
-        final result = await compute(_verifyAndParseInBackground, {
-          'bodyBytes': response.bodyBytes,
-          'pubX': _pubXHex,
-          'pubY': _pubYHex,
-        });
-
-        if (result['success'] == true) {
-          final List packets = result['packets'];
-          if (result['success'] == true) {
-            final List packets = result['packets'];
-
-            for (var packetData in packets) {
-              if (packetData['confidence'] is String) {
-                packetData['confidence'] = double.tryParse(
-                        packetData['confidence']?.toString() ?? '0.0') ??
-                    0.0;
-              }
-// checkpoint
-              if (packetData['explanation'] != null) {
-                var exp = packetData['explanation'];
-
-                exp['gnn_anomaly'] =
-                    double.tryParse(exp['gnn_anomaly'].toString()) ?? 0.0;
-                exp['mae_anomaly'] =
-                    double.tryParse(exp['mae_anomaly'].toString()) ?? 0.0;
-              }
-              // -----------------------
-
-              _addPacketFromApi(packetData);
-            }
-            notifyListeners();
-          }
-        }
-      }
-    } catch (e) {
-      print("🚨 Fetch Error: $e");
-    } finally {
-      _isProcessing = false; // Release the lock
     }
   }
 
@@ -427,6 +423,8 @@ class IdsProvider with ChangeNotifier {
   }
 
   Future<bool> _verifyServerSignature(Map<String, dynamic> responseBody) async {
+    final stopwatch = Stopwatch()..start();
+
     final String? signatureHex = responseBody['signature'];
 
     // Extract ONLY the payload. Do not include server_time or signature_type!
@@ -450,7 +448,14 @@ class IdsProvider with ChangeNotifier {
       final sigBytes = Uint8List.fromList(HEX.decode(signatureHex));
 
       // Pass the raw bytes of the JSON string to your verification function
-      return _ecdsaVerify(Uint8List.fromList(msgBytes), sigBytes);
+      final isValid = _ecdsaVerify(Uint8List.fromList(msgBytes), sigBytes);
+
+      stopwatch.stop();
+      // PINPOINT LOG: If this number is > 16ms, it's causing lag.
+      print(
+          "⏱️ ECC Math took: ${stopwatch.elapsedMilliseconds}ms (Goal: <16ms)");
+
+      return isValid;
     } catch (e) {
       print("🛡️ ECC: Error: $e");
       return false;
@@ -727,7 +732,9 @@ class IdsProvider with ChangeNotifier {
       length: data['length'],
       timestamp: DateTime.parse(data['timestamp']),
       status: data['status'],
-      confidence: (data['confidence'] ?? 0.0).toDouble(),
+      // Use tryParse here to handle Strings safely
+      confidence:
+          double.tryParse(data['confidence']?.toString() ?? '0.0') ?? 0.0,
       explanation: data['explanation'],
     );
   }
@@ -774,5 +781,89 @@ class IdsProvider with ChangeNotifier {
     _packets.insert(0, packet);
     _processedPacketIds.add(id);
     notifyListeners();
+  }
+}
+// --- STATIC HELPERS FOR ISOLATE (DO NOT MOVE INSIDE CLASS) ---
+
+/// Recursively sorts Map keys to ensure the JSON string matches the backend's hash
+dynamic _toSortedMapStatic(dynamic item) {
+  if (item is Map) {
+    final sortedKeys = item.keys.toList()..sort();
+    final result = <String, dynamic>{};
+    for (var key in sortedKeys) {
+      result[key] = _toSortedMapStatic(item[key]);
+    }
+    return result;
+  } else if (item is List) {
+    return item.map((e) => _toSortedMapStatic(e)).toList();
+  }
+  return item;
+}
+
+/// Perform the heavy ECC Math in the background
+bool _ecdsaVerifyRawStatic(
+    Uint8List message, Uint8List sigBytes, String pubXHex, String pubYHex) {
+  try {
+    final domainParams = pc.ECDomainParameters('prime256v1');
+    final x = BigInt.parse(pubXHex, radix: 16);
+    final y = BigInt.parse(pubYHex, radix: 16);
+
+    final point = domainParams.curve.createPoint(x, y);
+    final pubKey = pc.ECPublicKey(point, domainParams);
+
+    // 1. Hash the message bytes
+    final hash = sha256.convert(message).bytes;
+
+    // 2. Extract R and S from the 64-byte signature
+    final r = BigInt.parse(HEX.encode(sigBytes.sublist(0, 32)), radix: 16);
+    BigInt s = BigInt.parse(HEX.encode(sigBytes.sublist(32, 64)), radix: 16);
+
+    // 3. Low-S Normalization (Critical for Python/Cryptography lib compatibility)
+    if (s > (domainParams.n >> 1)) {
+      s = domainParams.n - s;
+    }
+
+    // 4. Verify Signature
+    final signer = pc.ECDSASigner(null, pc.HMac(pc.SHA256Digest(), 64));
+    signer.init(false, pc.PublicKeyParameter(pubKey));
+
+    return signer.verifySignature(
+        Uint8List.fromList(hash), pc.ECSignature(r, s));
+  } catch (e) {
+    debugPrint("🛡️ ECC Isolate Math Error: $e");
+    return false;
+  }
+}
+
+// --- 1. THE UNIFIED ISOLATE WORKER (Stays outside the class or static) ---
+// This handles decoding, sorting, hashing, and ECC math in the background.
+Future<Map<String, dynamic>> _secureParserIsolate(
+    Map<String, dynamic> params) async {
+  try {
+    final Uint8List bodyBytes = params['bodyBytes'];
+    final String pubX = params['pubX'];
+    final String pubY = params['pubY'];
+
+    final Map<String, dynamic> data = jsonDecode(utf8.decode(bodyBytes));
+    final String? sigHex = data['signature'];
+    final dynamic payload = data['payload'];
+
+    if (sigHex == null || payload == null) return {'success': false};
+
+    // Keep your exact sorting logic
+    final sortedPayload = _toSortedMapStatic(payload);
+    final jsonString = jsonEncode(sortedPayload);
+    final msgBytes = Uint8List.fromList(utf8.encode(jsonString));
+    final sigBytes = Uint8List.fromList(HEX.decode(sigHex));
+
+    // Verify using your existing math logic (Low-S normalization included)
+    bool isValid = _ecdsaVerifyRawStatic(msgBytes, sigBytes, pubX, pubY);
+
+    return {
+      'success': isValid,
+      'payload': payload,
+    };
+  } catch (e) {
+    return {'success': false, 'error': e.toString()};
   }
 }

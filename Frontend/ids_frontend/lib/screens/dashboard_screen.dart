@@ -8,7 +8,9 @@ import 'adaptation_screen.dart';
 class DashboardScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
-    final provider = Provider.of<IdsProvider>(context);
+    // listen: false prevents the entire screen from rebuilding on every change.
+    // We use Selector and Consumer for the parts that actually need to update.
+    final provider = Provider.of<IdsProvider>(context, listen: false);
 
     return Scaffold(
       body: Row(
@@ -21,36 +23,21 @@ class DashboardScreen extends StatelessWidget {
                 _buildTopBar(provider),
                 _buildCompactSearchFilterBar(provider),
 
-                // Optimized Sensory Layer
-                if (provider.isRunning)
-                  Padding(
-                    padding: EdgeInsets.symmetric(horizontal: 24, vertical: 4),
-                    child: SensoryDashboard(),
-                  ),
-
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(24, 12, 24, 4),
-                  child: Row(
-                    children: [
-                      const Icon(Icons.analytics_outlined,
-                          color: Colors.white24, size: 12),
-                      const SizedBox(width: 8),
-                      Text(
-                          "LIVE DATA STREAM [${provider.filteredPackets.length} PACKETS]",
-                          style: const TextStyle(
-                              color: Colors.white38,
-                              fontSize: 9,
-                              fontWeight: FontWeight.bold,
-                              letterSpacing: 1.5)),
-                      const Spacer(),
-                      const Text("REAL-TIME UPDATES ACTIVE",
-                          style: TextStyle(
-                              color: Colors.greenAccent,
-                              fontSize: 8,
-                              fontWeight: FontWeight.bold)),
-                    ],
-                  ),
+                // Optimized Sensory Layer - Only rebuilds if the engine starts/stops
+                Selector<IdsProvider, bool>(
+                  selector: (_, p) => p.isRunning,
+                  builder: (context, isRunning, child) {
+                    return isRunning
+                        ? Padding(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 24, vertical: 4),
+                            child: SensoryDashboard(),
+                          )
+                        : const SizedBox.shrink();
+                  },
                 ),
+
+                _buildStreamHeader(),
 
                 Expanded(child: PacketList()),
               ],
@@ -66,11 +53,40 @@ class DashboardScreen extends StatelessWidget {
     );
   }
 
+  // Extracted Stream Header to isolate the "Filtered Count" updates
+  Widget _buildStreamHeader() {
+    return Consumer<IdsProvider>(
+      builder: (context, provider, _) => Padding(
+        padding: const EdgeInsets.fromLTRB(24, 12, 24, 4),
+        child: Row(
+          children: [
+            const Icon(Icons.analytics_outlined,
+                color: Colors.white24, size: 12),
+            const SizedBox(width: 8),
+            Text(
+                "LIVE DATA STREAM [${provider.filteredPackets.length} PACKETS]",
+                style: const TextStyle(
+                    color: Colors.white38,
+                    fontSize: 9,
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: 1.5)),
+            const Spacer(),
+            if (provider.isRunning)
+              const Text("REAL-TIME UPDATES ACTIVE",
+                  style: TextStyle(
+                      color: Colors.greenAccent,
+                      fontSize: 8,
+                      fontWeight: FontWeight.bold)),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _buildCompactSearchFilterBar(IdsProvider provider) {
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 24, vertical: 4),
-      padding: const EdgeInsets.symmetric(
-          horizontal: 12, vertical: 2), // Tightened padding
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
       decoration: BoxDecoration(
         color: const Color(0xFF15191C),
         borderRadius: BorderRadius.circular(4),
@@ -82,18 +98,16 @@ class DashboardScreen extends StatelessWidget {
             flex: 3,
             child: TextField(
               onChanged: (val) => provider.updateSearchQuery(val),
-              textAlignVertical:
-                  TextAlignVertical.center, // FIX: Centers the placeholder text
+              textAlignVertical: TextAlignVertical.center,
               style: const TextStyle(
                   fontSize: 11, color: Colors.white, fontFamily: 'monospace'),
               decoration: const InputDecoration(
-                isCollapsed: true, // FIX: Removes default internal padding
+                isCollapsed: true,
                 hintText: "FILTER BY IP, PORT, OR PROTOCOL...",
                 hintStyle: TextStyle(color: Colors.white10, fontSize: 11),
                 prefixIcon: Icon(Icons.search, size: 14, color: Colors.white24),
                 border: InputBorder.none,
-                contentPadding: EdgeInsets.symmetric(
-                    vertical: 12), // Centers text vertically
+                contentPadding: EdgeInsets.symmetric(vertical: 12),
               ),
             ),
           ),
@@ -131,7 +145,11 @@ class DashboardScreen extends StatelessWidget {
                   fontWeight: FontWeight.bold,
                   letterSpacing: 1.5)),
           const SizedBox(height: 12),
-          _buildPowerControl(provider),
+          // Only rebuilds the button when engine status toggles
+          Selector<IdsProvider, bool>(
+            selector: (_, p) => p.isRunning,
+            builder: (context, isRunning, _) => _buildPowerControl(provider),
+          ),
           const SizedBox(height: 28),
           const Divider(color: Colors.white10, height: 1),
           const SizedBox(height: 20),
@@ -142,15 +160,37 @@ class DashboardScreen extends StatelessWidget {
                   fontWeight: FontWeight.bold,
                   letterSpacing: 1.2)),
           const SizedBox(height: 16),
-          _buildSidebarStat(
-              "TOTAL SCANS", provider.totalPackets, const Color(0xFF00E5FF)),
-          _buildSidebarStat("BENIGN", provider.normalCount, Colors.greenAccent),
-          _buildSidebarStat("THREATS", provider.attackCount, Colors.redAccent),
-          _buildSidebarStat(
-              "NOVELTY", provider.zeroDayCount, Colors.orangeAccent),
+
+          // Individual Selectors ensure sidebar text doesn't jitter
+          Selector<IdsProvider, int>(
+            selector: (_, p) => p.totalPackets,
+            builder: (_, val, __) =>
+                _buildSidebarStat("TOTAL SCANS", val, const Color(0xFF00E5FF)),
+          ),
+          Selector<IdsProvider, int>(
+            selector: (_, p) => p.normalCount,
+            builder: (_, val, __) =>
+                _buildSidebarStat("BENIGN", val, Colors.greenAccent),
+          ),
+          Selector<IdsProvider, int>(
+            selector: (_, p) => p.attackCount,
+            builder: (_, val, __) =>
+                _buildSidebarStat("THREATS", val, Colors.redAccent),
+          ),
+          Selector<IdsProvider, int>(
+            selector: (_, p) => p.zeroDayCount,
+            builder: (_, val, __) =>
+                _buildSidebarStat("NOVELTY", val, Colors.orangeAccent),
+          ),
+
           const Spacer(),
-          if (provider.totalSelected > 0)
-            _buildAdaptiveButton(context, provider),
+          // Adaptive Feedback button only shows when queue has items
+          Selector<IdsProvider, int>(
+            selector: (_, p) => p.totalSelected,
+            builder: (context, total, _) => total > 0
+                ? _buildAdaptiveButton(context, provider)
+                : const SizedBox.shrink(),
+          ),
         ],
       ),
     );
@@ -250,21 +290,22 @@ class DashboardScreen extends StatelessWidget {
                   fontWeight: FontWeight.w900,
                   letterSpacing: -0.5)),
           const SizedBox(width: 8),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-            decoration: BoxDecoration(
-              color: provider.isRunning
-                  ? Colors.greenAccent.withOpacity(0.1)
-                  : Colors.redAccent.withOpacity(0.1),
-              borderRadius: BorderRadius.circular(2),
+          Selector<IdsProvider, bool>(
+            selector: (_, p) => p.isRunning,
+            builder: (_, isRunning, __) => Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              decoration: BoxDecoration(
+                color: isRunning
+                    ? Colors.greenAccent.withOpacity(0.1)
+                    : Colors.redAccent.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(2),
+              ),
+              child: Text(isRunning ? "CORE ONLINE" : "OFFLINE",
+                  style: TextStyle(
+                      color: isRunning ? Colors.greenAccent : Colors.redAccent,
+                      fontSize: 8,
+                      fontWeight: FontWeight.bold)),
             ),
-            child: Text(provider.isRunning ? "CORE ONLINE" : "OFFLINE",
-                style: TextStyle(
-                    color: provider.isRunning
-                        ? Colors.greenAccent
-                        : Colors.redAccent,
-                    fontSize: 8,
-                    fontWeight: FontWeight.bold)),
           ),
           const Spacer(),
           const Icon(Icons.notifications_none, color: Colors.white12, size: 18),
@@ -274,31 +315,36 @@ class DashboardScreen extends StatelessWidget {
   }
 
   Widget _buildFilterChip(IdsProvider provider, String label, String filter) {
-    bool selected = provider.currentFilter == filter;
-    return Padding(
-      padding: const EdgeInsets.only(left: 6),
-      child: InkWell(
-        onTap: () => provider.setFilter(filter),
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 200),
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-          decoration: BoxDecoration(
-            color: selected
-                ? const Color(0xFF00E5FF).withOpacity(0.15)
-                : Colors.transparent,
-            borderRadius: BorderRadius.circular(2),
-            border: Border.all(
+    return Consumer<IdsProvider>(
+      builder: (context, p, _) {
+        bool selected = p.currentFilter == filter;
+        return Padding(
+          padding: const EdgeInsets.only(left: 6),
+          child: InkWell(
+            onTap: () => p.setFilter(filter),
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 200),
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
                 color: selected
-                    ? const Color(0xFF00E5FF).withOpacity(0.5)
-                    : Colors.white10),
+                    ? const Color(0xFF00E5FF).withOpacity(0.15)
+                    : Colors.transparent,
+                borderRadius: BorderRadius.circular(2),
+                border: Border.all(
+                    color: selected
+                        ? const Color(0xFF00E5FF).withOpacity(0.5)
+                        : Colors.white10),
+              ),
+              child: Text(label,
+                  style: TextStyle(
+                      color:
+                          selected ? const Color(0xFF00E5FF) : Colors.white38,
+                      fontSize: 8,
+                      fontWeight: FontWeight.bold)),
+            ),
           ),
-          child: Text(label,
-              style: TextStyle(
-                  color: selected ? const Color(0xFF00E5FF) : Colors.white38,
-                  fontSize: 8,
-                  fontWeight: FontWeight.bold)),
-        ),
-      ),
+        );
+      },
     );
   }
 

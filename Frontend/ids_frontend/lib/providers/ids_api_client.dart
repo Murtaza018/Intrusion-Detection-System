@@ -1,0 +1,166 @@
+// providers/ids_api_client.dart
+//
+// HTTP wrapper for: pipeline start/stop, retrain, analyze, labels, stats.
+// All signature verification is offloaded to a compute() isolate.
+
+import 'dart:convert';
+import 'dart:typed_data';
+
+import 'package:flutter/foundation.dart';
+import 'package:http/http.dart' as http;
+
+import '../models/packet.dart';
+import '../utils/isolate_workers.dart';
+import 'ids_config.dart';
+
+class IdsApiClient {
+  // ---------------------------------------------------------------------------
+  // Pipeline control
+  // ---------------------------------------------------------------------------
+
+  Future<bool> startPipeline() async {
+    try {
+      final res = await http.post(
+        Uri.parse('${IdsConfig.baseUrl}/api/pipeline/start'),
+        headers: IdsConfig.headers,
+      );
+      return res.statusCode == 200;
+    } catch (e) {
+      debugPrint('Pipeline start error: $e');
+      return false;
+    }
+  }
+
+  Future<void> stopPipeline() async {
+    try {
+      await http.post(
+        Uri.parse('${IdsConfig.baseUrl}/api/pipeline/stop'),
+        headers: IdsConfig.headers,
+      );
+    } catch (e) {
+      debugPrint('Pipeline stop error: $e');
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Continual learning
+  // ---------------------------------------------------------------------------
+
+  Future<bool> sendRetrainRequest({
+    required List<Packet> ganQueue,
+    required List<Packet> jitterQueue,
+    required String targetLabel,
+    required bool isNewLabel,
+  }) async {
+    try {
+      final body = jsonEncode({
+        'gan_queue': ganQueue
+            .map((p) => {'id': p.id, 'status': p.status, 'summary': p.summary})
+            .toList(),
+        'jitter_queue': jitterQueue
+            .map((p) => {'id': p.id, 'status': p.status, 'summary': p.summary})
+            .toList(),
+        'target_label': targetLabel,
+        'is_new_label': isNewLabel,
+      });
+      final res = await http.post(
+        Uri.parse('${IdsConfig.baseUrl}/api/retrain'),
+        headers: IdsConfig.headers,
+        body: body,
+      );
+      return res.statusCode == 200 && await _verifyInIsolate(res.bodyBytes);
+    } catch (e) {
+      debugPrint('Retrain error: $e');
+      return false;
+    }
+  }
+
+  Future<Map<String, dynamic>> analyzeQueues({
+    required List<Packet> ganQueue,
+    required List<Packet> jitterQueue,
+  }) async {
+    try {
+      final body = jsonEncode({
+        'gan_queue': ganQueue.map((p) => {'id': p.id}).toList(),
+        'jitter_queue': jitterQueue.map((p) => {'id': p.id}).toList(),
+      });
+      final res = await http.post(
+        Uri.parse('${IdsConfig.baseUrl}/api/analyze_selection'),
+        headers: IdsConfig.headers,
+        body: body,
+      );
+      final result = await _secureParseInIsolate(res.bodyBytes);
+      if (res.statusCode == 200 && result['success'] == true) {
+        return result['payload'] as Map<String, dynamic>;
+      }
+    } catch (e) {
+      debugPrint('Analyze queues error: $e');
+    }
+    return {'passed': false, 'error': 'Security failure or offline'};
+  }
+
+  // ---------------------------------------------------------------------------
+  // Labels
+  // ---------------------------------------------------------------------------
+
+  Future<List<String>> fetchLabels() async {
+    try {
+      final res = await http.get(
+        Uri.parse('${IdsConfig.baseUrl}/api/labels'),
+        headers: IdsConfig.headers,
+      );
+      final result = await _secureParseInIsolate(res.bodyBytes);
+      if (res.statusCode == 200 && result['success'] == true) {
+        return List<String>.from(result['payload']['labels']);
+      }
+    } catch (e) {
+      debugPrint('Label fetch error: $e');
+    }
+    return ['BENIGN', 'DDoS', 'PortScan', 'Bot', 'Infiltration'];
+  }
+
+  // ---------------------------------------------------------------------------
+  // Stats
+  // ---------------------------------------------------------------------------
+
+  Future<Map<String, int>?> fetchStats() async {
+    try {
+      final res = await http.get(
+        Uri.parse('${IdsConfig.baseUrl}/api/stats'),
+        headers: IdsConfig.headers,
+      );
+      final result = await _secureParseInIsolate(res.bodyBytes);
+      if (res.statusCode == 200 && result['success'] == true) {
+        final s = result['payload'];
+        return {
+          'total': s['total_packets'] as int? ?? 0,
+          'normal': s['normal_count'] as int? ?? 0,
+          'attack': s['attack_count'] as int? ?? 0,
+          'zero_day': s['zero_day_count'] as int? ?? 0,
+        };
+      }
+    } catch (e) {
+      debugPrint('Stats error: $e');
+    }
+    return null;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Isolate helpers — all ECC math runs off the UI thread
+  // ---------------------------------------------------------------------------
+
+  /// Verify only (bool result). Use when you don't need the payload back.
+  Future<bool> _verifyInIsolate(Uint8List bodyBytes) async {
+    final result = await _secureParseInIsolate(bodyBytes);
+    return result['success'] == true;
+  }
+
+  /// Decode + verify in one isolate round-trip.
+  Future<Map<String, dynamic>> _secureParseInIsolate(Uint8List bodyBytes) {
+    return compute(secureParserIsolate, {
+      'bodyBytes': bodyBytes,
+      'pubX': IdsConfig.pubXHex,
+      'pubY': IdsConfig.pubYHex,
+    });
+  }
+}

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../providers/ids_provider.dart';
+import '../models/packet.dart';
 
 class MaeVisualizerDialog extends StatefulWidget {
   final Packet packet;

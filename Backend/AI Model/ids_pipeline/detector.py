@@ -211,8 +211,6 @@ class Detector:
                 task = self.xai_queue.get(timeout=1)
                 if task is None: break
                 
-                # 1. SHAP INITIALIZATION (Roadmap Point 3)
-                # Build background context if not already initialized
                 if not self.xai_explainer.initialized:
                     bg_samples_unscaled = self.feature_extractor.get_background_samples()
                     if len(bg_samples_unscaled) >= BACKGROUND_SUMMARY_SIZE:

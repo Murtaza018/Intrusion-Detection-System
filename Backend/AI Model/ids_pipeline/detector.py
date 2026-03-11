@@ -200,8 +200,6 @@ class Detector:
 
     def _xai_worker(self):
         """
-        SHAP XAI worker thread with Metadata Preservation.
-        Uses specialized database updates to ensure network info is not overwritten.
         """
         print("[*] XAI worker started")
         target_model = self.model_loader.get_xgb_model()

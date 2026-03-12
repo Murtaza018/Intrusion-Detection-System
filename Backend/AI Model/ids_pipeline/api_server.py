@@ -48,7 +48,7 @@ class APIServer:
         self.model_loader = model_loader
         
         # Initialize Retrainers
-        self.gan_retrainer = GanRetrainer(packet_storage, feature_extractor)
+        self.gan_retrainer = GanRetrainer(packet_storage, feature_extractor,model_loader)
 
         # --- ECC INITIALIZATION ---
         self._initialize_ecc()

@@ -4,13 +4,9 @@
 // Keep these separate so they are easy to comment out or extend
 // without touching any production logic.
 
-import 'dart:typed_data';
-
 import 'package:flutter/foundation.dart';
-import 'package:hex/hex.dart';
 import 'package:pointycastle/export.dart' as pc;
 
-import '../utils/crypto_utils.dart';
 import 'ids_config.dart';
 
 class IdsDiagnostics {

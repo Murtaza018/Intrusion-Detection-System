@@ -36,6 +36,8 @@ def calculate_group_consistency(feature_list):
 
 class APIServer:
     """Flask API server for the Hybrid IDS with ECC Signing."""
+    def _get_require_api_key_decorator(self):
+        return self._require_api_key
     
     def __init__(self, packet_storage, feature_extractor, pipeline_manager, model_loader):
         self.app = Flask(__name__)
@@ -48,7 +50,8 @@ class APIServer:
         self.model_loader = model_loader
         
         # Initialize Retrainers
-        self.gan_retrainer = GanRetrainer(packet_storage, feature_extractor,model_loader)
+        self.gan_retrainer   = GanRetrainer(packet_storage, feature_extractor, model_loader)
+        self.retrain_manager = RetrainManager(self.gan_retrainer)
 
         # --- ECC INITIALIZATION ---
         self._initialize_ecc()

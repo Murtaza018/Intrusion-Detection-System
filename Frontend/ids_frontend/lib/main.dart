@@ -25,7 +25,7 @@ class MyApp extends StatelessWidget {
             surface: const Color(0xFF15191C),
             error: const Color(0xFFFF5252),
           ),
-          cardTheme: CardThemeData(
+          cardTheme: CardTheme(
             color: const Color(0xFF1A1F24),
             elevation: 0,
             shape: RoundedRectangleBorder(

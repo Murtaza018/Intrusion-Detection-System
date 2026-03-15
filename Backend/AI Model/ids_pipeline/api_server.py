@@ -15,6 +15,8 @@ from cryptography.hazmat.primitives.asymmetric import utils
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 
+from retrain_manager import RetrainManager, JobStatus
+from gan_retrainer import GanRetrainer
 # --- CONFIG ---
 from config import API_KEY
 
@@ -174,6 +176,86 @@ class APIServer:
 
     def _register_routes(self):
         """Setup Flask routes with API key authentication."""
+
+        def register_retrain_routes(app, api_server):
+            """
+            Call this inside _register_routes() instead of defining the old
+            trigger_retrain() function.
+
+            Or simply copy the three route functions below into _register_routes().
+            """
+
+            require_api_key = api_server._get_require_api_key_decorator()
+
+           
+            @app.route("/api/retrain", methods=['POST'])
+            @require_api_key
+            def trigger_retrain():
+                data = request.json
+                if not data:
+                    return api_server._secure_response({"error": "No data provided"}, 400)
+
+                gan_packets  = data.get('gan_queue', [])
+                target_label = data.get('target_label', 'Unknown_Attack')
+                is_new_label = data.get('is_new_label', False)
+
+                if not gan_packets:
+                    return api_server._secure_response({"error": "No packets provided"}, 400)
+
+                gan_ids = [p['id'] for p in gan_packets]
+
+                job, accepted = api_server.retrain_manager.submit(
+                    packet_ids = gan_ids,
+                    label      = target_label,
+                    is_new     = is_new_label,
+                )
+
+                if not accepted:
+                    # A job is already running — return its current status
+                    return api_server._secure_response({
+                        "error":   "A retrain job is already running",
+                        "current": api_server.retrain_manager.get_status(),
+                    }, 409)
+
+                payload = {
+                    "job_id":   job.job_id,
+                    "status":   job.status.value,
+                    "label":    job.label,
+                    "message":  f"Retrain job '{job.job_id}' queued for label '{target_label}'.",
+                }
+                return api_server._secure_response(payload, 202)
+
+            # ------------------------------------------------------------------
+            # GET /api/retrain/status
+            # Flutter polls this every 3–5 s while the job is running.
+            # Returns the full job state dict.
+            # ------------------------------------------------------------------
+            @app.route("/api/retrain/status", methods=['GET'])
+            @require_api_key
+            def retrain_status():
+                status = api_server.retrain_manager.get_status()
+                if status is None:
+                    return api_server._secure_response({"status": "idle", "message": "No retrain job has run yet."})
+                return api_server._secure_response(status)
+
+            # ------------------------------------------------------------------
+            # POST /api/retrain/cancel
+            # Marks the current job as failed/cancelled so Flutter stops polling.
+            # Does NOT interrupt the background thread (unsafe mid-training).
+            # ------------------------------------------------------------------
+            @app.route("/api/retrain/cancel", methods=['POST'])
+            @require_api_key
+            def retrain_cancel():
+                job = api_server.retrain_manager.get_job()
+                if job is None or job.status.value in (JobStatus.DONE, JobStatus.FAILED, JobStatus.ROLLED_BACK):
+                    return api_server._secure_response({"message": "No active job to cancel."})
+
+                # Mark cancelled — thread will still finish but results won't be returned to Flutter
+                job.status = JobStatus.FAILED
+                job.phase  = "cancelled"
+                job.error  = "Cancelled by user"
+                return api_server._secure_response({"message": f"Job {job.job_id} marked as cancelled."})
+
         
         def require_api_key(f):
             @wraps(f)

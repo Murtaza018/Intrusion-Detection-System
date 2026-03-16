@@ -246,4 +246,52 @@ class IdsState with ChangeNotifier {
     _existingLabels = labels;
     notifyListeners();
   }
+
+// ---------------------------------------------------------------------------
+// Retrain job state  (updated by RetrainJobPoller)
+// ---------------------------------------------------------------------------
+
+  String? _retrainJobId = null;
+  String _retrainStatus = 'idle';
+  String _retrainPhase = '';
+  int _retrainProgress = 0;
+  String? _retrainError = null;
+  Map<String, dynamic> _retrainResults = {};
+
+  String? get retrainJobId => _retrainJobId;
+  String get retrainStatus => _retrainStatus;
+  String get retrainPhase => _retrainPhase;
+  int get retrainProgress => _retrainProgress;
+  String? get retrainError => _retrainError;
+  Map<String, dynamic> get retrainResults => Map.unmodifiable(_retrainResults);
+
+  bool get isRetraining =>
+      _retrainStatus == 'queued' || _retrainStatus == 'running';
+
+  void updateRetrainJob({
+    String? jobId,
+    required String status,
+    required String phase,
+    required int progress,
+    String? error,
+    Map<String, dynamic>? retrainResults,
+  }) {
+    _retrainJobId = jobId ?? _retrainJobId;
+    _retrainStatus = status;
+    _retrainPhase = phase;
+    _retrainProgress = progress;
+    _retrainError = error;
+    if (retrainResults != null) _retrainResults = retrainResults;
+    notifyListeners();
+  }
+
+  void clearRetrainJob() {
+    _retrainJobId = null;
+    _retrainStatus = 'idle';
+    _retrainPhase = '';
+    _retrainProgress = 0;
+    _retrainError = null;
+    _retrainResults = {};
+    notifyListeners();
+  }
 }

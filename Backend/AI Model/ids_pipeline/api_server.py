@@ -9,288 +9,128 @@ import os
 import joblib
 import json
 import numpy as np
-from cryptography.hazmat.primitives.asymmetric import utils 
+from cryptography.hazmat.primitives.asymmetric import utils
 
-# --- ECC CRYPTOGRAPHY IMPORTS ---
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 
 from retrain_manager import RetrainManager, JobStatus
 from gan_retrainer import GanRetrainer
-# --- CONFIG ---
 from config import API_KEY
 
-# --- RETRAINER IMPORTS ---
-from gan_retrainer import GanRetrainer
 
-# --- HELPER FUNCTIONS ---
 def calculate_group_consistency(feature_list):
-    """Calculates Cosine Similarity for consistency checks."""
     if not feature_list or len(feature_list) < 2: return 1.0
     matrix = np.array(feature_list)
     try:
+        from sklearn.metrics.pairwise import cosine_similarity
         sim_matrix = cosine_similarity(matrix)
         iu = np.triu_indices(len(sim_matrix), k=1)
         if len(iu[0]) == 0: return 1.0
-        avg_similarity = np.mean(sim_matrix[iu])
-        return float(avg_similarity)
-    except: return 0.0
+        return float(np.mean(sim_matrix[iu]))
+    except:
+        return 0.0
+
 
 class APIServer:
-    """Flask API server for the Hybrid IDS with ECC Signing."""
-    def _get_require_api_key_decorator(self):
-        return self._require_api_key
-    
+
     def __init__(self, packet_storage, feature_extractor, pipeline_manager, model_loader):
         self.app = Flask(__name__)
         CORS(self.app)
-        
-        # Store Dependencies
-        self.packet_storage = packet_storage
+
+        self.packet_storage    = packet_storage
         self.feature_extractor = feature_extractor
-        self.pipeline_manager = pipeline_manager
-        self.model_loader = model_loader
-        
-        # Initialize Retrainers
+        self.pipeline_manager  = pipeline_manager
+        self.model_loader      = model_loader
+
         self.gan_retrainer   = GanRetrainer(packet_storage, feature_extractor, model_loader)
         self.retrain_manager = RetrainManager(self.gan_retrainer)
 
-        # --- ECC INITIALIZATION ---
         self._initialize_ecc()
-
-        # Setup Routes
         self._register_routes()
 
+    # ------------------------------------------------------------------
+    # ECC
+    # ------------------------------------------------------------------
+
     def _initialize_ecc(self):
-        """Loads the ECC Private Key using absolute pathing."""
         try:
-            # 1. Get the directory where api_server.py is located
-            # Path: .../Backend/AI Model/ids_pipeline/
-            script_dir = os.path.dirname(os.path.abspath(__file__))
-
-            # 2. Go up two levels to reach the 'Backend' folder
-            # Path: .../Backend/
+            script_dir   = os.path.dirname(os.path.abspath(__file__))
             backend_base = os.path.abspath(os.path.join(script_dir, "..", ".."))
-
-            # 3. Target the ECC folder inside Backend
-            key_path = os.path.join(backend_base, "ECC", "key.pem")
+            key_path     = os.path.join(backend_base, "ECC", "key.pem")
 
             if not os.path.exists(key_path):
-                # Final fallback: check the current working directory
                 key_path = os.path.abspath("Backend/ECC/key.pem")
 
-            with open(key_path, "rb") as key_file:
-                self.private_key = serialization.load_pem_private_key(
-                    key_file.read(),
-                    password=None, 
-                )
+            with open(key_path, "rb") as f:
+                self.private_key = serialization.load_pem_private_key(f.read(), password=None)
 
-            import json
-            test_data = {"gnn_anomaly":0,"mae_anomaly":0.054724205285310745,"status":"normal"}
-            json_str = json.dumps(test_data, sort_keys=True, separators=(',', ':'))
-            print(repr(json_str))
-
-            # In _generate_signature, add temporarily:
-            # print(f"[TEST] JSON: {repr(json_str)}")     
-            
-            # P-256 field prime
-            q = 0xFFFFFFFF00000001000000000000000000000000FFFFFFFFFFFFFFFFFFFFFFFF
-
-            pub_numbers = self.private_key.public_key().public_numbers()
-            print(f"X: {hex(pub_numbers.x)}")
-            print(f"Y: {hex(pub_numbers.y)}")
-            print(f"X < q: {pub_numbers.x < q}")
-            print(f"Y < q: {pub_numbers.y < q}")
-            print(f"X hex padded: {pub_numbers.x.to_bytes(32, 'big').hex()}")
-            print(f"Y hex padded: {pub_numbers.y.to_bytes(32, 'big').hex()}") 
-
-            from cryptography.hazmat.primitives.asymmetric import ec
-            print(type(self.private_key.public_key().public_numbers()))
-            print(self.private_key.public_key().key_size)
-
-
-            print(f"[*] ECC Security Layer: {key_path} loaded successfully.")
-            pub_numbers = self.private_key.public_key().public_numbers()
-            x_hex = pub_numbers.x.to_bytes(32, 'big').hex()
-            y_hex = pub_numbers.y.to_bytes(32, 'big').hex()
-            print(f"X length: {len(x_hex)}")
-            print(f"Y length: {len(y_hex)}")
-            print(f"X: '{x_hex}'")
-            print(f"Y: '{y_hex}'")
-            # Also print as individual chars to be sure
-            print(f"X[0:4]: '{x_hex[0:4]}'")
+            pub = self.private_key.public_key().public_numbers()
+            print(f"[*] ECC loaded. X: {pub.x.to_bytes(32,'big').hex()}")
         except Exception as e:
-            print(f"[!] ECC Initialization Error: {e}")
-            print(f"[!] Attempted path: {key_path if 'key_path' in locals() else 'Unknown'}")
+            print(f"[!] ECC Init Error: {e}")
             self.private_key = None
-
-    
 
     def _generate_signature(self, data_dict):
         if not self.private_key:
             return "NO_KEY_LOADED"
-        
         try:
-            json_str = json.dumps(data_dict, sort_keys=True, separators=(',', ':'),ensure_ascii=False)
-            # print(f"[TEST] JSON: {repr(json_str)}")
-
-            # print(f"--- ECC DEBUG START ---")
-            # print(f"RAW BYTES TO SIGN (HEX): {json_str.encode().hex()}")
-            # print(f"FIRST 50 CHARS: {json_str[:50]}")
-            # print(f"--- ECC DEBUG END ---")
-
-            import hashlib
-            hash_hex = hashlib.sha256(json_str.encode('utf-8')).hexdigest()
-            print(f"[TEST] Hash: {hash_hex}")
-            
-            signature_der = self.private_key.sign(
-                json_str.encode('utf-8'),
-                ec.ECDSA(hashes.SHA256())
-            )
-            
-            r, s = utils.decode_dss_signature(signature_der)
-            r_bytes = r.to_bytes(32, 'big')
-            s_bytes = s.to_bytes(32, 'big')
-            signature_raw = r_bytes + s_bytes
-            
-            sig_hex = signature_raw.hex()
-            
-            # ADD THESE
-            print(f"[SIG] r bytes: {len(r_bytes)}, s bytes: {len(s_bytes)}")
-            print(f"[SIG] Final hex: {sig_hex}")
-            print(f"[SIG] Final hex length: {len(sig_hex)}")
-            
-            return sig_hex
+            json_str = json.dumps(data_dict, sort_keys=True, separators=(',', ':'), ensure_ascii=False)
+            sig_der  = self.private_key.sign(json_str.encode('utf-8'), ec.ECDSA(hashes.SHA256()))
+            r, s     = utils.decode_dss_signature(sig_der)
+            return (r.to_bytes(32, 'big') + s.to_bytes(32, 'big')).hex()
         except Exception as e:
             print(f"[!] Signing Error: {e}")
-            return "SIGNING_FAILED"    
+            return "SIGNING_FAILED"
+
     def _secure_response(self, data, status=200):
-        """Helper to wrap all responses with a digital signature."""
-        response_body = {
-            "payload": data,
-            "signature": self._generate_signature(data),
+        body = {
+            "payload":        data,
+            "signature":      self._generate_signature(data),
             "signature_type": "ECDSA_SHA256",
-            "server_time": datetime.now().isoformat()
+            "server_time":    datetime.now().isoformat(),
         }
-        return jsonify(response_body), status
+        return jsonify(body), status
+
+    # ------------------------------------------------------------------
+    # Routes
+    # ------------------------------------------------------------------
 
     def _register_routes(self):
-        """Setup Flask routes with API key authentication."""
 
-        def register_retrain_routes(app, api_server):
-            """
-            Call this inside _register_routes() instead of defining the old
-            trigger_retrain() function.
-
-            Or simply copy the three route functions below into _register_routes().
-            """
-
-            require_api_key = api_server._get_require_api_key_decorator()
-
-           
-            @app.route("/api/retrain", methods=['POST'])
-            @require_api_key
-            def trigger_retrain():
-                data = request.json
-                if not data:
-                    return api_server._secure_response({"error": "No data provided"}, 400)
-
-                gan_packets  = data.get('gan_queue', [])
-                target_label = data.get('target_label', 'Unknown_Attack')
-                is_new_label = data.get('is_new_label', False)
-
-                if not gan_packets:
-                    return api_server._secure_response({"error": "No packets provided"}, 400)
-
-                gan_ids = [p['id'] for p in gan_packets]
-
-                job, accepted = api_server.retrain_manager.submit(
-                    packet_ids = gan_ids,
-                    label      = target_label,
-                    is_new     = is_new_label,
-                )
-
-                if not accepted:
-                    # A job is already running — return its current status
-                    return api_server._secure_response({
-                        "error":   "A retrain job is already running",
-                        "current": api_server.retrain_manager.get_status(),
-                    }, 409)
-
-                payload = {
-                    "job_id":   job.job_id,
-                    "status":   job.status.value,
-                    "label":    job.label,
-                    "message":  f"Retrain job '{job.job_id}' queued for label '{target_label}'.",
-                }
-                return api_server._secure_response(payload, 202)
-
-            # ------------------------------------------------------------------
-            # GET /api/retrain/status
-            # Flutter polls this every 3–5 s while the job is running.
-            # Returns the full job state dict.
-            # ------------------------------------------------------------------
-            @app.route("/api/retrain/status", methods=['GET'])
-            @require_api_key
-            def retrain_status():
-                status = api_server.retrain_manager.get_status()
-                if status is None:
-                    return api_server._secure_response({"status": "idle", "message": "No retrain job has run yet."})
-                return api_server._secure_response(status)
-
-            # ------------------------------------------------------------------
-            # POST /api/retrain/cancel
-            # Marks the current job as failed/cancelled so Flutter stops polling.
-            # Does NOT interrupt the background thread (unsafe mid-training).
-            # ------------------------------------------------------------------
-            @app.route("/api/retrain/cancel", methods=['POST'])
-            @require_api_key
-            def retrain_cancel():
-                job = api_server.retrain_manager.get_job()
-                if job is None or job.status.value in (JobStatus.DONE, JobStatus.FAILED, JobStatus.ROLLED_BACK):
-                    return api_server._secure_response({"message": "No active job to cancel."})
-
-                # Mark cancelled — thread will still finish but results won't be returned to Flutter
-                job.status = JobStatus.FAILED
-                job.phase  = "cancelled"
-                job.error  = "Cancelled by user"
-                return api_server._secure_response({"message": f"Job {job.job_id} marked as cancelled."})
-
-        
-        def require_api_key(f):
+        # ── Auth decorator stored as instance attribute so other methods
+        #    can reference it via self._require_api_key
+        def _require_api_key(f):
             @wraps(f)
-            def decorated_function(*args, **kwargs):
-                # GET THE KEY FROM HEADERS
-                sent_key = request.headers.get('X-API-Key')
-                
-               
-                
-                if sent_key != API_KEY:
+            def decorated(*args, **kwargs):
+                if request.headers.get('X-API-Key') != API_KEY:
                     return jsonify({"error": "Invalid API key"}), 401
                 return f(*args, **kwargs)
-            return decorated_function
-        
-        # --- 1. PIPELINE CONTROL ---
+            return decorated
+
+        # Expose on instance so _get_require_api_key_decorator() works
+        self._require_api_key = _require_api_key
+
+        # ── 1. Pipeline control ───────────────────────────────────────
+
         @self.app.route("/api/pipeline/start", methods=['POST'])
-        @require_api_key
+        @_require_api_key
         def start_pipeline():
             try:
-                sys.stdout.flush()
                 success = self.pipeline_manager.start()
                 if success:
-                    data = {
-                        "status": "started", 
+                    return self._secure_response({
+                        "status": "started",
                         "message": "IDS pipeline started",
-                        "start_time": datetime.now().isoformat()
-                    }
-                    return self._secure_response(data)
+                        "start_time": datetime.now().isoformat(),
+                    })
                 return self._secure_response({"error": "Failed to start pipeline"}, 500)
             except Exception as e:
                 traceback.print_exc()
                 return self._secure_response({"error": str(e)}, 500)
-        
+
         @self.app.route("/api/pipeline/stop", methods=['POST'])
-        @require_api_key
+        @_require_api_key
         def stop_pipeline():
             try:
                 self.pipeline_manager.stop()
@@ -299,137 +139,162 @@ class APIServer:
                 return self._secure_response({"error": str(e)}, 500)
 
         @self.app.route("/api/pipeline/status", methods=['GET'])
-        @require_api_key
+        @_require_api_key
         def get_pipeline_status():
-            data = {
-                "running": self.pipeline_manager.is_running(),
-                "start_time": self.packet_storage.get_stats().get("start_time"),
-                "packets_processed": self.packet_storage.get_stats()["total_packets"],
-            }
-            return self._secure_response(data)
+            stats = self.packet_storage.get_stats()
+            return self._secure_response({
+                "running":           self.pipeline_manager.is_running(),
+                "start_time":        stats.get("start_time"),
+                "packets_processed": stats["total_packets"],
+            })
 
-        # --- 2. DATA FETCHING ---
+        # ── 2. Data fetching ──────────────────────────────────────────
+
         @self.app.route("/api/packets/recent", methods=['GET'])
-        @require_api_key
+        @_require_api_key
         def get_recent_packets():
-            limit = request.args.get('limit', default=10, type=int)
-            offset = request.args.get('offset', default=0, type=int)
+            limit  = request.args.get('limit',  default=10,   type=int)
+            offset = request.args.get('offset', default=0,    type=int)
             status = request.args.get('status', default=None, type=str)
-            
+
             packets = self.packet_storage.get_packets(limit=limit, offset=offset, status_filter=status)
-            
-            # Normalize numeric types so signature matches Flutter's JSON parsing
-            # Inside api_server.py
             for p in packets:
-                # Convert numbers to strings with fixed precision
                 p['confidence'] = "{:.4f}".format(float(p.get('confidence', 0.0)))
-                if 'explanation' in p and isinstance(p['explanation'], dict):
+                if isinstance(p.get('explanation'), dict):
                     exp = p['explanation']
-                    if 'gnn_anomaly' in exp:
-                        exp['gnn_anomaly'] = "{:.4f}".format(float(exp.get('gnn_anomaly', 0.0)))
-                    if 'mae_anomaly' in exp:
-                        exp['mae_anomaly'] = "{:.4f}".format(float(exp.get('mae_anomaly', 0.0)))
-            data = {
-                "packets": packets,
-                "count": len(packets),
-            }
-            return self._secure_response(data)
+                    for key in ('gnn_anomaly', 'mae_anomaly'):
+                        if key in exp:
+                            exp[key] = "{:.4f}".format(float(exp.get(key, 0.0)))
+
+            return self._secure_response({"packets": packets, "count": len(packets)})
 
         @self.app.route("/api/sensory/live", methods=['GET'])
-        @require_api_key
+        @_require_api_key
         def get_live_sensory():
             recent = self.packet_storage.get_packets(limit=1)
             if recent:
-                p = recent[0]
-                expl = p.get('explanation', {})
-                # Round the sensory values to 4 decimal places
-                data = {
+                expl = recent[0].get('explanation', {})
+                return self._secure_response({
                     "gnn_anomaly": "{:.4f}".format(float(expl.get('gnn_anomaly', 0.0))),
                     "mae_anomaly": "{:.4f}".format(float(expl.get('mae_anomaly', 0.0))),
-                    "status": p.get('status', 'unknown'),
-                }
-                return self._secure_response(data)
+                    "status":      recent[0].get('status', 'unknown'),
+                })
             return self._secure_response({"gnn_anomaly": 0.0, "mae_anomaly": 0.0})
 
         @self.app.route("/api/stats", methods=['GET'])
-        @require_api_key
+        @_require_api_key
         def get_stats():
             stats = self.packet_storage.get_stats()
-            recent_packets = self.packet_storage.get_packets(limit=50)
-            if recent_packets:
-                mae_vals = [p.get('explanation', {}).get('mae_anomaly', 0) for p in recent_packets]
-                stats["avg_visual_anomaly"] = round(float(np.mean(mae_vals)), 4)
-            else:
-                stats["avg_visual_anomaly"] = 0.0
-
+            recent = self.packet_storage.get_packets(limit=50)
+            mae_vals = [p.get('explanation', {}).get('mae_anomaly', 0) for p in recent]
+            stats["avg_visual_anomaly"] = round(float(np.mean(mae_vals)), 4) if mae_vals else 0.0
             try:
-                mem = psutil.Process().memory_info().rss / 1024 / 1024
-                stats["memory_usage_mb"] = round(mem, 1)
-            except: 
+                stats["memory_usage_mb"] = round(psutil.Process().memory_info().rss / 1024 / 1024, 1)
+            except:
                 stats["memory_usage_mb"] = 0.0
-            
             return self._secure_response(stats)
 
-        # --- 3. LABELS ---
+        # ── 3. Labels ─────────────────────────────────────────────────
+
         @self.app.route("/api/labels", methods=['GET'])
-        @require_api_key
+        @_require_api_key
         def get_labels():
             try:
-                possible_paths = ["ids_pipeline/label_encoder.pkl", "label_encoder.pkl"]
-                target_path = next((p for p in possible_paths if os.path.exists(p)), None)
-                if target_path:
-                    encoder = joblib.load(target_path)
-                    return self._secure_response({"labels": list(encoder.classes_)})
-            except: pass
+                for path in ["ids_pipeline/label_encoder.pkl", "label_encoder.pkl"]:
+                    if os.path.exists(path):
+                        encoder = joblib.load(path)
+                        return self._secure_response({"labels": list(encoder.classes_)})
+            except:
+                pass
             return self._secure_response({"labels": ["BENIGN", "DDoS", "PortScan", "Bot", "WebAttack"]})
 
-        # --- 4. CONTINUAL LEARNING (GAN ANALYSIS) ---
+        # ── 4. Continual learning — analysis ─────────────────────────
+
         @self.app.route("/api/analyze_selection", methods=['POST'])
-        @require_api_key
+        @_require_api_key
         def analyze_selection():
-            data = request.json
+            data    = request.json
             gan_ids = [p['id'] for p in data.get('gan_queue', [])]
-            resp_payload = {"gan_score": 0.0, "gan_status": "Insufficient Data"}
+            payload = {"gan_score": 0.0, "gan_status": "Insufficient Data"}
 
             if gan_ids:
-                raw_feats = self.packet_storage.get_features_for_training(gan_ids)
-                feats = [f for f in raw_feats if f is not None and len(f) > 0]
+                feats = [f for f in self.packet_storage.get_features_for_training(gan_ids)
+                         if f is not None and len(f) > 0]
                 if len(feats) > 1:
                     score = calculate_group_consistency(feats)
-                    resp_payload["gan_score"] = round(score, 4)
-                    if score > 0.9: resp_payload["gan_status"] = "Excellent (Homogeneous)"
-                    elif score > 0.6: resp_payload["gan_status"] = "Mixed (Caution)"
-                    else: resp_payload["gan_status"] = "Poor (Too Diverse)"
+                    payload["gan_score"] = round(score, 4)
+                    payload["gan_status"] = (
+                        "Excellent (Homogeneous)" if score > 0.9 else
+                        "Mixed (Caution)"         if score > 0.6 else
+                        "Poor (Too Diverse)"
+                    )
                 elif len(feats) == 1:
-                    resp_payload["gan_score"] = 1.0
-                    resp_payload["gan_status"] = "Single Item"
+                    payload["gan_score"]  = 1.0
+                    payload["gan_status"] = "Single Item"
 
-            return self._secure_response(resp_payload)
+            return self._secure_response(payload)
+
+        # ── 5. Retrain — async (replaces the old blocking route) ──────
 
         @self.app.route("/api/retrain", methods=['POST'])
-        @require_api_key
+        @_require_api_key
         def trigger_retrain():
             data = request.json
-            if not data: return self._secure_response({"error": "No data provided"}, 400)
-            
-            gan_packets = data.get('gan_queue', [])
+            if not data:
+                return self._secure_response({"error": "No data provided"}, 400)
+
+            gan_packets  = data.get('gan_queue', [])
             target_label = data.get('target_label', 'Unknown_Attack')
             is_new_label = data.get('is_new_label', False)
-            
+
             if not gan_packets:
-                return self._secure_response({"message": "No packets to retrain on."})
+                return self._secure_response({"error": "No packets provided"}, 400)
 
-            gan_ids = [p['id'] for p in gan_packets]
-            result = self.gan_retrainer.retrain(gan_ids, target_label, is_new_label)
+            job, accepted = self.retrain_manager.submit(
+                packet_ids = [p['id'] for p in gan_packets],
+                label      = target_label,
+                is_new     = is_new_label,
+            )
 
-            final_data = {
-                "status": "success" if result['status'] == 'success' else "error", 
-                "message": result['message'],
-                "gan_count": len(gan_packets)
-            }
-            return self._secure_response(final_data)
+            if not accepted:
+                return self._secure_response({
+                    "error":   "A retrain job is already running",
+                    "current": self.retrain_manager.get_status(),
+                }, 409)
+
+            return self._secure_response({
+                "job_id":  job.job_id,
+                "status":  job.status.value,
+                "label":   job.label,
+                "message": f"Retrain job '{job.job_id}' queued for label '{target_label}'.",
+            }, 202)
+
+        @self.app.route("/api/retrain/status", methods=['GET'])
+        @_require_api_key
+        def retrain_status():
+            status = self.retrain_manager.get_status()
+            if status is None:
+                return self._secure_response({"status": "idle", "message": "No retrain job has run yet."})
+            return self._secure_response(status)
+
+        @self.app.route("/api/retrain/cancel", methods=['POST'])
+        @_require_api_key
+        def retrain_cancel():
+            job = self.retrain_manager.get_job()
+            if job is None or job.status.value in (
+                JobStatus.DONE.value, JobStatus.FAILED.value, JobStatus.ROLLED_BACK.value
+            ):
+                return self._secure_response({"message": "No active job to cancel."})
+
+            job.status = JobStatus.FAILED
+            job.phase  = "cancelled"
+            job.error  = "Cancelled by user"
+            return self._secure_response({"message": f"Job {job.job_id} marked as cancelled."})
+
+    def _get_require_api_key_decorator(self):
+        """Exposed so external helpers can reuse the auth decorator."""
+        return self._require_api_key
 
     def run(self, host="0.0.0.0", port=5001):
-        """Run the Flask server."""
-        print(f"[*] Starting Secure Production API with ECC Signing on http://{host}:{port}")
+        print(f"[*] Starting Secure API on http://{host}:{port}")
         self.app.run(host=host, port=port, debug=True, use_reloader=False)

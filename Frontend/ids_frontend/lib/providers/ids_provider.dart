@@ -19,6 +19,7 @@ import 'ids_diagnostics.dart';
 import 'ids_filter_controller.dart';
 import 'ids_packet_fetcher.dart';
 import 'ids_state.dart';
+import 'retrain_job_poller.dart';
 
 class IdsProvider with ChangeNotifier {
   IdsProvider() {
@@ -31,6 +32,7 @@ class IdsProvider with ChangeNotifier {
   final IdsApiClient _api = IdsApiClient();
   late final IdsPacketFetcher _fetcher = IdsPacketFetcher(_state);
   late final IdsFilterController _filters = IdsFilterController(_state);
+  late final RetrainJobPoller _retrainPoller = RetrainJobPoller(_state);
 
   // ---------------------------------------------------------------------------
   // State passthrough getters
@@ -56,6 +58,13 @@ class IdsProvider with ChangeNotifier {
   bool get consistencyPassed => _state.consistencyPassed;
   List<String> get existingLabels => _state.existingLabels;
   bool isSelected(int id) => _filters.isSelected(id);
+  String? get retrainJobId => _state.retrainJobId;
+  String get retrainStatus => _state.retrainStatus;
+  String get retrainPhase => _state.retrainPhase;
+  int get retrainProgress => _state.retrainProgress;
+  String? get retrainError => _state.retrainError;
+  Map<String, dynamic> get retrainResults => _state.retrainResults;
+  bool get isRetraining => _state.isRetraining;
 
   // ---------------------------------------------------------------------------
   // Filter & selection passthrough
@@ -95,15 +104,25 @@ class IdsProvider with ChangeNotifier {
   // Continual learning
   // ---------------------------------------------------------------------------
 
-  Future<bool> sendRetrainRequest() async {
-    if (_state.ganQueue.isEmpty || _state.batchLabel == null) return false;
-    return _api.sendRetrainRequest(
-      ganQueue: _state.ganQueue,
-      jitterQueue: _state.jitterQueue,
+  Future<String?> sendRetrainRequest() async {
+    if (_state.ganQueue.isEmpty || _state.batchLabel == null) return null;
+    if (_state.isRetraining) return _state.retrainJobId; // already running
+
+    return _retrainPoller.submitRetrainJob(
+      ganQueue: _state.ganQueue
+          .map((p) => {'id': p.id, 'status': p.status, 'summary': p.summary})
+          .toList(),
+      jitterQueue: _state.jitterQueue
+          .map((p) => {'id': p.id, 'status': p.status, 'summary': p.summary})
+          .toList(),
       targetLabel: _state.batchLabel!,
       isNewLabel: _state.isNewAttack,
     );
   }
+
+  Future<void> cancelRetrain() => _retrainPoller.cancelJob();
+
+  void clearRetrainJob() => _state.clearRetrainJob();
 
   Future<Map<String, dynamic>> analyzeQueues() async {
     if (_state.ganQueue.isEmpty && _state.jitterQueue.isEmpty) return {};
@@ -134,5 +153,6 @@ class IdsProvider with ChangeNotifier {
     _state.removeListener(notifyListeners);
     _state.dispose();
     super.dispose();
+    _retrainPoller.stopPolling();
   }
 }

@@ -106,6 +106,7 @@ class ContinualRetrainer:
         n_replay = min(
             REPLAY_SAMPLE_SIZE,
             int(len(X_new) * (1 - NEW_DATA_WEIGHT) / NEW_DATA_WEIGHT),
+            len(self._replay_X),   # never request more than what exists
         )
         idx   = np.random.choice(len(self._replay_X), size=n_replay, replace=False)
         X_rep = self._replay_X[idx]
@@ -210,7 +211,9 @@ class ContinualRetrainer:
         path  = self.model_loader.get_path("cnn")
         if model is None:
             return "skipped"
-        bak = path + ".bak"
+        # Keras 3 requires a valid extension — place backup alongside original
+        # using a proper .keras extension so model.save() doesn't reject it.
+        bak = os.path.splitext(path)[0] + "_bak.keras"
         try:
             model.save(bak)
             score_before = self._keras_binary_f1(model, X_scaled, y_binary)
@@ -242,6 +245,9 @@ class ContinualRetrainer:
             print(f"[!] CNN error: {e}")
             traceback.print_exc()
             return "error"
+        finally:
+            if os.path.exists(bak):
+                os.remove(bak)
 
     # ------------------------------------------------------------------
     # AE  (Keras autoencoder)
@@ -255,7 +261,8 @@ class ContinualRetrainer:
         path  = self.model_loader.get_path("ae")
         if model is None:
             return "skipped"
-        bak = path + ".bak"
+        # Same fix as CNN — Keras 3 requires a valid .keras extension on backup
+        bak = os.path.splitext(path)[0] + "_bak.keras"
         try:
             model.save(bak)
             loss_before = self._keras_recon_loss(model, X_scaled)
@@ -300,6 +307,9 @@ class ContinualRetrainer:
             print(f"[!] AE error: {e}")
             traceback.print_exc()
             return "error"
+        finally:
+            if os.path.exists(bak):
+                os.remove(bak)
 
     # ------------------------------------------------------------------
     # MAE  (PyTorch masked autoencoder)
@@ -367,80 +377,28 @@ class ContinualRetrainer:
             return "error"
 
     # ------------------------------------------------------------------
-    # GNN  (PyTorch — freeze early layers, fine-tune last conv + head)
+    # GNN  — skipped during continual retraining
+    #
+    # ContextSAGE expects node feature vectors of dimension GNN_IN_CHANNELS
+    # (36 in your config), built from live network graph topology by
+    # FeatureExtractor.graph_builder during detection.
+    # A synthetic CSV of flat 78-dim packet features cannot be converted
+    # into that graph format without a running capture session, so there
+    # is no meaningful way to fine-tune the GNN offline.
+    #
+    # The GNN contributes the topology embedding (gnn_vec) which is one
+    # of 17 extra dimensions appended to the 78-dim feature vector before
+    # XGBoost/RF classification. Those two models ARE retrained here and
+    # will adapt to the new attack class. The GNN itself only needs
+    # retraining if the network topology patterns of the new attack class
+    # are structurally different from all existing classes — which is a
+    # separate, online process handled by the live detection pipeline.
     # ------------------------------------------------------------------
 
     def _retrain_gnn(self, X_scaled, y_binary):
-        model = self.model_loader.get_gnn_model()
-        path  = self.model_loader.get_path("gnn")
-        if model is None:
-            return "skipped"
-        bak = path + ".bak"
-        try:
-            torch.save(model.state_dict(), bak)
-
-            # Find the name prefix of the last conv layer
-            last_conv_name = None
-            for name, _ in model.named_parameters():
-                if "conv" in name.lower():
-                    last_conv_name = name.split(".")[0]
-
-            for name, param in model.named_parameters():
-                param.requires_grad = (
-                    last_conv_name is not None and last_conv_name in name
-                ) or "lin" in name.lower() or "fc" in name.lower()
-
-            trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
-            print(f"[GNN] Trainable params: {trainable:,}")
-
-            optimizer    = torch.optim.Adam(
-                filter(lambda p: p.requires_grad, model.parameters()), lr=GNN_LR
-            )
-            score_before = self._gnn_f1(model, X_scaled, y_binary)
-            model.train()
-
-            for epoch in range(GNN_FINE_TUNE_EPOCHS):
-                total_loss = 0.0
-                perm = np.random.permutation(len(X_scaled))
-                for i in range(0, len(X_scaled), 32):
-                    idx     = perm[i:i+32]
-                    X_batch = torch.tensor(X_scaled[idx], dtype=torch.float)
-                    y_batch = torch.tensor(y_binary[idx], dtype=torch.float)
-                    n       = len(idx)
-                    edge_index = torch.stack([torch.arange(n), torch.arange(n)], dim=0)
-                    optimizer.zero_grad()
-                    out    = model(X_batch, edge_index)
-                    logit  = out.mean(dim=1)
-                    loss   = F.binary_cross_entropy_with_logits(logit, y_batch)
-                    loss.backward()
-                    optimizer.step()
-                    total_loss += loss.item()
-                if epoch % 5 == 0:
-                    print(f"[GNN] Epoch {epoch}/{GNN_FINE_TUNE_EPOCHS} loss={total_loss:.4f}")
-
-            for param in model.parameters():
-                param.requires_grad = True
-            model.eval()
-
-            score_after = self._gnn_f1(model, X_scaled, y_binary)
-            delta = score_after - score_before
-            print(f"[GNN] F1 {score_before:.3f} → {score_after:.3f} (Δ{delta:+.3f})")
-
-            if delta < MIN_SCORE_DELTA:
-                print("[!] GNN: rolling back")
-                model.load_state_dict(torch.load(bak))
-                model.eval()
-                return "rolled_back"
-
-            torch.save(model.state_dict(), path)
-            return "ok"
-        except Exception as e:
-            print(f"[!] GNN error: {e}")
-            traceback.print_exc()
-            if os.path.exists(bak):
-                model.load_state_dict(torch.load(bak))
-                model.eval()
-            return "error"
+        print("[GNN] Skipped — requires live graph topology data, "
+              "not available from a static synthetic CSV.")
+        return "skipped"
 
     # ------------------------------------------------------------------
     # Metric helpers
@@ -462,17 +420,3 @@ class ContinualRetrainer:
             t     = torch.tensor(X_scaled, dtype=torch.float)
             recon, original = model(t, mask_ratio=0.15)
             return float(F.mse_loss(recon, original).item())
-
-    @staticmethod
-    def _gnn_f1(model, X_scaled, y_binary):
-        model.eval()
-        preds = []
-        with torch.no_grad():
-            for i in range(0, len(X_scaled), 64):
-                X_b = torch.tensor(X_scaled[i:i+64], dtype=torch.float)
-                n   = len(X_b)
-                ei  = torch.stack([torch.arange(n), torch.arange(n)], dim=0)
-                out = model(X_b, ei)
-                pred = (torch.sigmoid(out.mean(dim=1)) > 0.5).int().cpu().numpy()
-                preds.extend(pred)
-        return float(f1_score(y_binary.astype(int), preds, average="macro", zero_division=0))

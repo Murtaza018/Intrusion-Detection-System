@@ -238,7 +238,8 @@ class _AdaptationScreenState extends State<AdaptationScreen> {
                           ScaffoldMessenger.of(context).showSnackBar(SnackBar(
                               content: Text("Sending data..."),
                               duration: Duration(seconds: 1)));
-                          bool success = await provider.sendRetrainRequest();
+                          final jobId = await provider.sendRetrainRequest();
+                          bool success = jobId != null;
                           if (success) {
                             provider.clearQueues();
                             if (context.mounted) {

@@ -150,7 +150,7 @@ class Detector:
                     # --- [FEATURE FUSION: 78 + 16 + 1 = 95] ---
                     # Defining it early here ensures correct scope for handlers
                     enhanced_features = np.hstack([scaled_features, gnn_vec, [[mae_err]]])
-                    print(f"DEBUG: Raw GNN Vec Mean: {np.mean(gnn_vec):.4f}")
+                    # print(f"DEBUG: Raw GNN Vec Mean: {np.mean(gnn_vec):.4f}")
                     raw_gnn_val = float(np.mean(np.abs(gnn_vec)))
 
                     # LOG-NORMALIZATION: log1p(x) handles the explosion gracefully.
@@ -173,8 +173,8 @@ class Detector:
                     
                     ensemble_prob = max(cnn_prob, rf_prob, xgb_prob)
                     
-                    if packet_id % 50 == 0:
-                        print(f"[SENSE] ID:{packet_id} | MAE:{mae_err:.4f} | ENSEMBLE:{ensemble_prob:.2f}")
+                    # if packet_id % 50 == 0:
+                    #     print(f"[SENSE] ID:{packet_id} | MAE:{mae_err:.4f} | ENSEMBLE:{ensemble_prob:.2f}")
 
                     if ensemble_prob > 0.40:
                         # Passing enhanced_features (95-dim) to XAI queue

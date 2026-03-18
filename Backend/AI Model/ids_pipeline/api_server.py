@@ -17,6 +17,7 @@ from cryptography.hazmat.primitives.asymmetric import ec
 from retrain_manager import RetrainManager, JobStatus
 from gan_retrainer import GanRetrainer
 from config import API_KEY
+import logging
 
 
 def calculate_group_consistency(feature_list):
@@ -297,4 +298,7 @@ class APIServer:
 
     def run(self, host="0.0.0.0", port=5001):
         print(f"[*] Starting Secure API on http://{host}:{port}")
+        
+        log = logging.getLogger('werkzeug')
+        log.setLevel(logging.ERROR)
         self.app.run(host=host, port=port, debug=True, use_reloader=False)

@@ -31,16 +31,12 @@ class _AdaptationScreenState extends State<AdaptationScreen> {
       ),
       body: Column(
         children: [
-          // 1. Compact Labeling Section
           _buildCompactLabelingSection(context, provider),
           Divider(height: 1, thickness: 1),
-
-          // 2. Main Content (Two Columns)
           Expanded(
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                // LEFT: JITTER QUEUE
                 Expanded(
                   flex: 1,
                   child: _buildQueueList(context, "False Positives (Jitter)",
@@ -48,8 +44,6 @@ class _AdaptationScreenState extends State<AdaptationScreen> {
                 ),
                 VerticalDivider(
                     width: 1, thickness: 1, color: Colors.grey[300]),
-
-                // RIGHT: GAN QUEUE
                 Expanded(
                   flex: 1,
                   child: _buildQueueList(context, "New Attacks (GAN)",
@@ -73,9 +67,8 @@ class _AdaptationScreenState extends State<AdaptationScreen> {
       padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       color: Colors.white,
       child: Column(
-        mainAxisSize: MainAxisSize.min, // Shrink to fit
+        mainAxisSize: MainAxisSize.min,
         children: [
-          // Row 1: Title + Toggle Chips (Side by Side to save space)
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
@@ -94,10 +87,8 @@ class _AdaptationScreenState extends State<AdaptationScreen> {
             ],
           ),
           SizedBox(height: 8),
-
-          // Row 2: Input Field (Thinner)
           SizedBox(
-            height: 48, // Fixed height for compactness
+            height: 48,
             child: provider.isNewAttack
                 ? TextField(
                     decoration: _compactInputDecoration("Enter New Attack Name",
@@ -135,8 +126,7 @@ class _AdaptationScreenState extends State<AdaptationScreen> {
       labelText: label,
       prefixIcon: Icon(icon, color: color, size: 20),
       border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-      contentPadding:
-          EdgeInsets.symmetric(horizontal: 12, vertical: 0), // Minimal padding
+      contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 0),
       labelStyle: TextStyle(fontSize: 13),
     );
   }
@@ -167,7 +157,7 @@ class _AdaptationScreenState extends State<AdaptationScreen> {
     );
   }
 
-  // --- BOTTOM BAR (ACTIONS) ---
+  // --- BOTTOM BAR ---
   Widget _buildBottomBar(BuildContext context, IdsProvider provider) {
     bool hasLabel =
         provider.batchLabel != null && provider.batchLabel!.isNotEmpty;
@@ -179,7 +169,7 @@ class _AdaptationScreenState extends State<AdaptationScreen> {
     bool trainingReady = provider.consistencyChecked && consistencyReady;
 
     return Container(
-      padding: EdgeInsets.fromLTRB(16, 8, 16, 16), // Reduced top padding
+      padding: EdgeInsets.fromLTRB(16, 8, 16, 16),
       decoration: BoxDecoration(
         color: Colors.white,
         boxShadow: [
@@ -189,7 +179,6 @@ class _AdaptationScreenState extends State<AdaptationScreen> {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          // Warning Text (Only shows if needed)
           if ((hasGanPackets || hasJitterPackets) && !trainingReady)
             Padding(
               padding: const EdgeInsets.only(bottom: 8.0),
@@ -203,11 +192,9 @@ class _AdaptationScreenState extends State<AdaptationScreen> {
                     fontWeight: FontWeight.w500),
               ),
             ),
-
-          // Two Buttons Side-by-Side
           Row(
             children: [
-              // 2. CHECK CONSISTENCY
+              // CHECK CONSISTENCY
               Expanded(
                 child: OutlinedButton.icon(
                   onPressed: (!consistencyReady || provider.totalSelected <= 1)
@@ -228,13 +215,12 @@ class _AdaptationScreenState extends State<AdaptationScreen> {
               ),
               SizedBox(width: 12),
 
-              // 3. START TRAINING
+              // START TRAINING
               Expanded(
                 child: ElevatedButton.icon(
                   onPressed: !trainingReady
                       ? null
                       : () async {
-                          // (Same logic as before)
                           ScaffoldMessenger.of(context).showSnackBar(SnackBar(
                               content: Text("Sending data..."),
                               duration: Duration(seconds: 1)));
@@ -270,7 +256,7 @@ class _AdaptationScreenState extends State<AdaptationScreen> {
     );
   }
 
-  // --- QUEUE LIST (No Changes needed here) ---
+  // --- QUEUE LIST ---
   Widget _buildQueueList(
       BuildContext context, String title, List<Packet> queue, Color color) {
     return Column(
@@ -297,17 +283,17 @@ class _AdaptationScreenState extends State<AdaptationScreen> {
                         border: Border(
                             bottom: BorderSide(color: Colors.grey[200]!))),
                     child: ListTile(
-                      dense: true, // Make list tile compact
+                      dense: true,
                       contentPadding:
                           EdgeInsets.symmetric(horizontal: 12, vertical: 0),
                       leading: CircleAvatar(
                         backgroundColor: color.withOpacity(0.1),
+                        radius: 14,
                         child: Text("${queue[i].id}",
                             style: TextStyle(
                                 fontSize: 9,
                                 fontWeight: FontWeight.bold,
                                 color: color)),
-                        radius: 14,
                       ),
                       title: Text(queue[i].summary,
                           maxLines: 1,
@@ -328,13 +314,15 @@ class _AdaptationScreenState extends State<AdaptationScreen> {
     );
   }
 
-  // --- ANALYSIS DIALOG (Same logic, just keeping it here) ---
+  // --- ANALYSIS DIALOG ---
   void _showAnalysisDialog(BuildContext context, IdsProvider provider) async {
     showDialog(
         context: context,
         barrierDismissible: false,
         builder: (_) => Center(child: CircularProgressIndicator()));
+
     final result = await provider.analyzeQueues();
+
     if (context.mounted) Navigator.pop(context);
     provider.setConsistencyStatus(true, true);
 
@@ -349,10 +337,16 @@ class _AdaptationScreenState extends State<AdaptationScreen> {
             mainAxisSize: MainAxisSize.min,
             children: [
               _buildScoreTile(
-                  "GAN Queue", result['gan_score'], result['gan_status']),
+                "GAN Queue",
+                result['gan_score'],
+                result['gan_status'] as String? ?? 'No data',
+              ),
               SizedBox(height: 16),
-              _buildScoreTile("Jitter Queue", result['jitter_score'],
-                  result['jitter_status']),
+              _buildScoreTile(
+                "Jitter Queue",
+                result['jitter_score'],
+                result['jitter_status'] as String? ?? 'Not analysed',
+              ),
               SizedBox(height: 10),
             ],
           ),
@@ -365,11 +359,14 @@ class _AdaptationScreenState extends State<AdaptationScreen> {
     }
   }
 
-  Widget _buildScoreTile(String title, dynamic score, String status) {
+  // --- SCORE TILE ---
+  Widget _buildScoreTile(String title, dynamic score, String? status) {
     double s = (score is num) ? score.toDouble() : 0.0;
+    String safeStatus = status ?? 'No data';
     bool hasData = s > 0.0 ||
-        (status != "No Features Found" && status != "Not enough data");
+        (safeStatus != "No Features Found" && safeStatus != "Not enough data");
     Color color = s > 0.7 ? Colors.green : Colors.red;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -393,7 +390,8 @@ class _AdaptationScreenState extends State<AdaptationScreen> {
               minHeight: 8),
         ),
         SizedBox(height: 4),
-        Text(status, style: TextStyle(color: Colors.grey[600], fontSize: 11)),
+        Text(safeStatus,
+            style: TextStyle(color: Colors.grey[600], fontSize: 11)),
       ],
     );
   }

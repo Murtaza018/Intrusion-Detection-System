@@ -14,11 +14,13 @@ class JobStatus(str, Enum):
 
 
 class RetrainJob:
-    def __init__(self, job_id: str, label: str, is_new: bool, packet_count: int):
+    def __init__(self, job_id: str, label: str, is_new: bool,
+                 packet_count: int, pipeline: str):
         self.job_id          = job_id
         self.label           = label
         self.is_new          = is_new
         self.packet_count    = packet_count
+        self.pipeline        = pipeline   # 'gan' | 'jitter'
         self.status          = JobStatus.QUEUED
         self.phase           = "queued"
         self.progress        = 0
@@ -30,7 +32,8 @@ class RetrainJob:
 
 class RetrainManager:
 
-    _PHASE_PROGRESS = {
+    # GAN has more phases so its progress map is fuller
+    _GAN_PHASE_PROGRESS = {
         "backing_up":        5,
         "label_encoding":   10,
         "architecture":     15,
@@ -43,19 +46,26 @@ class RetrainManager:
         "done":            100,
     }
 
-    def __init__(self, gan_retrainer):
-        self._gan_retrainer  = gan_retrainer
-        self._lock           = threading.Lock()
-        self._current_job    = None
-        # Saved once on first job — always wrap from these, never from
-        # previously patched versions, so hooks never stack across jobs.
-        self._original_methods = None
+    _JITTER_PHASE_PROGRESS = {
+        "fetching_features": 10,
+        "augmenting":        30,
+        "model_finetuning":  50,
+        "done":             100,
+    }
+
+    def __init__(self, gan_retrainer, jitter_retrainer):
+        self._gan_retrainer     = gan_retrainer
+        self._jitter_retrainer  = jitter_retrainer
+        self._lock              = threading.Lock()
+        self._current_job       = None
+        self._original_methods  = None   # saved once to prevent hook stacking
 
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
 
-    def submit(self, packet_ids, label, is_new):
+    def submit(self, packet_ids: list, label: str, is_new: bool,
+               pipeline: str = 'gan') -> tuple:
         with self._lock:
             if self._current_job and self._current_job.status in (
                 JobStatus.QUEUED, JobStatus.RUNNING
@@ -63,16 +73,19 @@ class RetrainManager:
                 return self._current_job, False
 
             job = RetrainJob(
-                job_id       = str(uuid.uuid4())[:8],
-                label        = label,
-                is_new       = is_new,
-                packet_count = len(packet_ids),
+                job_id        = str(uuid.uuid4())[:8],
+                label         = label,
+                is_new        = is_new,
+                packet_count  = len(packet_ids),
+                pipeline      = pipeline,
             )
             self._current_job = job
 
         threading.Thread(
-            target=self._run_job, args=(job, packet_ids),
-            daemon=True, name=f"retrain-{job.job_id}"
+            target = self._run_job,
+            args   = (job, packet_ids),
+            daemon = True,
+            name   = f"retrain-{job.job_id}",
         ).start()
         return job, True
 
@@ -89,14 +102,24 @@ class RetrainManager:
     # Background worker
     # ------------------------------------------------------------------
 
-    def _run_job(self, job, packet_ids):
+    def _run_job(self, job: RetrainJob, packet_ids: list):
         job.status     = JobStatus.RUNNING
         job.started_at = datetime.now().isoformat()
         try:
-            self._patch_progress_hooks(job)
-            result = self._gan_retrainer.retrain(
-                packet_ids=packet_ids, target_label=job.label, is_new_label=job.is_new
-            )
+            if job.pipeline == 'jitter':
+                self._patch_jitter_hooks(job)
+                result = self._jitter_retrainer.retrain(
+                    packet_ids   = packet_ids,
+                    target_label = job.label,
+                )
+            else:
+                self._patch_gan_hooks(job)
+                result = self._gan_retrainer.retrain(
+                    packet_ids   = packet_ids,
+                    target_label = job.label,
+                    is_new_label = job.is_new,
+                )
+
             if result.get("status") == "success":
                 job.status          = JobStatus.DONE
                 job.phase           = "done"
@@ -110,6 +133,7 @@ class RetrainManager:
                 job.status = JobStatus.FAILED
                 job.phase  = "failed"
                 job.error  = result.get("message", "Unknown error")
+
         except Exception as e:
             job.status = JobStatus.FAILED
             job.phase  = "failed"
@@ -119,11 +143,10 @@ class RetrainManager:
             job.finished_at = datetime.now().isoformat()
 
     # ------------------------------------------------------------------
-    # Progress hooks
+    # Progress hooks — GAN pipeline
     # ------------------------------------------------------------------
 
-    def _save_originals(self):
-        """Capture true originals once. Never overwritten after first call."""
+    def _save_gan_originals(self):
         if self._original_methods is not None:
             return
         r  = self._gan_retrainer
@@ -132,54 +155,79 @@ class RetrainManager:
             "handle_label_encoder": r._handle_label_encoder,
             "expand_model_classes": r._expand_model_classes,
             "prepare_training_batch": r._prepare_training_batch,
-            "generate_and_save": r._generate_and_save_packets,
+            "generate_and_save":    r._generate_and_save_packets,
             "update_replay_buffer": r._update_replay_buffer,
-            "continual_run": cr.run,
+            "gan_continual_run":    cr.run,
         }
 
-    def _patch_progress_hooks(self, job):
-        self._save_originals()
+    def _patch_gan_hooks(self, job: RetrainJob):
+        self._save_gan_originals()
         orig = self._original_methods
         r    = self._gan_retrainer
         cr   = r.continual_retrainer
 
         def make_hook(original, phase):
             def hooked(*args, **kwargs):
-                self._set_phase(job, phase)
+                self._set_phase(job, phase, self._GAN_PHASE_PROGRESS)
                 return original(*args, **kwargs)
             return hooked
 
-        r._handle_label_encoder    = make_hook(orig["handle_label_encoder"],  "label_encoding")
-        r._expand_model_classes    = make_hook(orig["expand_model_classes"],   "architecture")
-        r._generate_and_save_packets = make_hook(orig["generate_and_save"],    "synthesis")
-        r._update_replay_buffer    = make_hook(orig["update_replay_buffer"],   "replay_update")
+        r._handle_label_encoder      = make_hook(orig["handle_label_encoder"],  "label_encoding")
+        r._expand_model_classes      = make_hook(orig["expand_model_classes"],   "architecture")
+        r._generate_and_save_packets = make_hook(orig["generate_and_save"],      "synthesis")
+        r._update_replay_buffer      = make_hook(orig["update_replay_buffer"],   "replay_update")
 
-        # prepare_training_batch: set data_prep on entry, wgan_training on exit
         orig_prepare = orig["prepare_training_batch"]
         def prepare_hook(*args, **kwargs):
-            self._set_phase(job, "data_prep")
+            self._set_phase(job, "data_prep", self._GAN_PHASE_PROGRESS)
             result = orig_prepare(*args, **kwargs)
-            self._set_phase(job, "wgan_training")
+            self._set_phase(job, "wgan_training", self._GAN_PHASE_PROGRESS)
             return result
         r._prepare_training_batch = prepare_hook
 
-        orig_cr_run = orig["continual_run"]
+        orig_cr_run = orig["gan_continual_run"]
         def cr_run_hook(*args, **kwargs):
-            self._set_phase(job, "model_finetuning")
+            self._set_phase(job, "model_finetuning", self._GAN_PHASE_PROGRESS)
             return orig_cr_run(*args, **kwargs)
         cr.run = cr_run_hook
 
-    def _set_phase(self, job, phase):
+    # ------------------------------------------------------------------
+    # Progress hooks — Jitter pipeline
+    # ------------------------------------------------------------------
+
+    def _patch_jitter_hooks(self, job: RetrainJob):
+        jr = self._jitter_retrainer
+        cr = jr.continual_retrainer
+
+        # Save jitter originals separately (keyed differently to avoid collision)
+        if not hasattr(self, '_jitter_originals'):
+            self._jitter_originals = {
+                "jitter_retrain":    jr.retrain,
+                "jitter_continual_run": cr.run,
+            }
+
+        orig_run = self._jitter_originals["jitter_continual_run"]
+        def cr_jitter_hook(*args, **kwargs):
+            self._set_phase(job, "model_finetuning", self._JITTER_PHASE_PROGRESS)
+            return orig_run(*args, **kwargs)
+        cr.run = cr_jitter_hook
+
+    # ------------------------------------------------------------------
+    # Shared
+    # ------------------------------------------------------------------
+
+    def _set_phase(self, job: RetrainJob, phase: str, phase_map: dict):
         job.phase    = phase
-        job.progress = self._PHASE_PROGRESS.get(phase, job.progress)
-        print(f"[RetrainManager] Job {job.job_id}: {phase} ({job.progress}%)")
+        job.progress = phase_map.get(phase, job.progress)
+        print(f"[RetrainManager] Job {job.job_id} ({job.pipeline}): {phase} ({job.progress}%)")
 
     @staticmethod
-    def _job_to_dict(job):
+    def _job_to_dict(job: RetrainJob) -> dict:
         return {
             "job_id":          job.job_id,
             "label":           job.label,
             "is_new":          job.is_new,
+            "pipeline":        job.pipeline,
             "packet_count":    job.packet_count,
             "status":          job.status.value,
             "phase":           job.phase,

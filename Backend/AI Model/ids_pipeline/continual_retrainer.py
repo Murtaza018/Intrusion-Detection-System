@@ -180,22 +180,25 @@ class ContinualRetrainer:
             score_before  = f1_score(y, y_pred_before, average="macro", zero_division=0)
 
             joblib.dump(model, bak)
-            model.fit(X, y)
 
-            y_pred_after = model.predict(X)
+            # Train on a fresh copy loaded from the backup so the live model
+            # object (held by the detection thread) is never mutated mid-inference.
+            trained = joblib.load(bak)
+            trained.fit(X, y)
+
+            y_pred_after = trained.predict(X)
             score_after  = f1_score(y, y_pred_after, average="macro", zero_division=0)
             delta = score_after - score_before
             print(f"[{name}] F1 {score_before:.3f} → {score_after:.3f} (Δ{delta:+.3f})")
 
             if delta < MIN_SCORE_DELTA:
                 print(f"[!] {name}: rolling back")
-                restored = joblib.load(bak)
-                # FIX: use the explicit loader_key, not a derived string
-                if hasattr(self.model_loader, "_models"):
-                    self.model_loader._models[loader_key] = restored
+                # Original is already on disk as bak — nothing to swap
                 return "rolled_back"
 
-            joblib.dump(model, path)
+            # Atomic swap: detection thread gets fully-trained model instantly
+            joblib.dump(trained, path)
+            self.model_loader.swap_model(loader_key, trained)
             return "ok"
         except Exception as e:
             print(f"[!] {name} error: {e}")
@@ -236,7 +239,7 @@ class ContinualRetrainer:
             if delta < MIN_SCORE_DELTA:
                 print("[!] CNN: rolling back")
                 restored = keras.models.load_model(bak, compile=False)
-                self.model_loader._models["cnn"] = restored
+                self.model_loader.swap_model("cnn", restored)
                 return "rolled_back"
 
             model.save(path)
@@ -298,7 +301,7 @@ class ContinualRetrainer:
             if delta > abs(loss_before) * 0.20:
                 print("[!] AE: loss increased >20% — rolling back")
                 restored = keras.models.load_model(bak, compile=False)
-                self.model_loader._models["ae"] = restored
+                self.model_loader.swap_model("ae", restored)
                 return "rolled_back"
 
             model.save(path)

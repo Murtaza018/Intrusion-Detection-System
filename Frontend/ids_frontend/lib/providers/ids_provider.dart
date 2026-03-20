@@ -105,8 +105,15 @@ class IdsProvider with ChangeNotifier {
   // ---------------------------------------------------------------------------
 
   Future<String?> sendRetrainRequest() async {
-    if (_state.ganQueue.isEmpty || _state.batchLabel == null) return null;
-    if (_state.isRetraining) return _state.retrainJobId; // already running
+    final hasGan = _state.ganQueue.isNotEmpty;
+    final hasJitter = _state.jitterQueue.isNotEmpty;
+
+    if (!hasGan && !hasJitter) return null;
+    if (_state.isRetraining) return _state.retrainJobId;
+
+    // Jitter-only: no label needed, default to BENIGN
+    // GAN: label must be set
+    if (hasGan && _state.batchLabel == null) return null;
 
     return _retrainPoller.submitRetrainJob(
       ganQueue: _state.ganQueue
@@ -115,7 +122,7 @@ class IdsProvider with ChangeNotifier {
       jitterQueue: _state.jitterQueue
           .map((p) => {'id': p.id, 'status': p.status, 'summary': p.summary})
           .toList(),
-      targetLabel: _state.batchLabel!,
+      targetLabel: hasGan ? _state.batchLabel! : 'BENIGN',
       isNewLabel: _state.isNewAttack,
     );
   }

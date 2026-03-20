@@ -166,7 +166,8 @@ class _AdaptationScreenState extends State<AdaptationScreen> {
 
     bool consistencyReady =
         (hasGanPackets || hasJitterPackets) && (!hasGanPackets || hasLabel);
-    bool trainingReady = provider.consistencyChecked && consistencyReady;
+    bool trainingReady = consistencyReady &&
+        (provider.ganQueue.isEmpty || provider.consistencyChecked);
 
     return Container(
       padding: EdgeInsets.fromLTRB(16, 8, 16, 16),
@@ -185,7 +186,9 @@ class _AdaptationScreenState extends State<AdaptationScreen> {
               child: Text(
                 (hasGanPackets && !hasLabel)
                     ? "* Select a label above to proceed"
-                    : "* Check consistency before training",
+                    : (hasGanPackets && !provider.consistencyChecked)
+                        ? "* Check consistency before training"
+                        : "", // jitter-only — no warning needed
                 style: TextStyle(
                     color: Colors.orange[800],
                     fontSize: 12,
@@ -195,25 +198,27 @@ class _AdaptationScreenState extends State<AdaptationScreen> {
           Row(
             children: [
               // CHECK CONSISTENCY
-              Expanded(
-                child: OutlinedButton.icon(
-                  onPressed: (!consistencyReady || provider.totalSelected <= 1)
-                      ? null
-                      : () => _showAnalysisDialog(context, provider),
-                  icon: Icon(Icons.analytics_outlined, size: 18),
-                  label: Text(
-                      provider.consistencyChecked
-                          ? "Re-Check"
-                          : "Check Consistency",
-                      style: TextStyle(fontSize: 13)),
-                  style: OutlinedButton.styleFrom(
-                    padding: EdgeInsets.symmetric(vertical: 14),
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(8)),
+              if (hasGanPackets)
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed:
+                        (!consistencyReady || provider.totalSelected <= 1)
+                            ? null
+                            : () => _showAnalysisDialog(context, provider),
+                    icon: Icon(Icons.analytics_outlined, size: 18),
+                    label: Text(
+                        provider.consistencyChecked
+                            ? "Re-Check"
+                            : "Check Consistency",
+                        style: TextStyle(fontSize: 13)),
+                    style: OutlinedButton.styleFrom(
+                      padding: EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8)),
+                    ),
                   ),
                 ),
-              ),
-              SizedBox(width: 12),
+              if (hasGanPackets) SizedBox(width: 12),
 
               // START TRAINING
               Expanded(

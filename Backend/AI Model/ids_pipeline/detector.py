@@ -360,7 +360,7 @@ class Detector:
             }
         """
         if raw_features.ndim == 1:
-            raw_features = raw_features.reshape(1, -1)
+            raw_features = raw_features.reshape(1, -1)  # (1, 78)
 
         # 1. Get models
         cnn_model = self.model_loader.get_main_model()
@@ -371,32 +371,30 @@ class Detector:
         mae_model = self.model_loader.get_mae_model()
 
         # 2. Scale features (same as in _detection_worker)
-        scaled_features = self.feature_extractor.scale_features(raw_features)  # 78‑dim
+        scaled_features = self.feature_extractor.scale_features(raw_features)  # maybe 3D
+
+        # Ensure scaled_features is 2D for stacking
+        scaled_features = scaled_features.reshape(scaled_features.shape[0], -1)  # (1, 78)
 
         # 3. GNN vector: try to build graph from extra_info
         gnn_vec = np.zeros((1, GNN_EMBEDDING_DIM), dtype=np.float32)
         gnn_anomaly_val = 0.0
 
         if extra_info and gnn_model is not None:
-            # Pretend there is a flow (you can refine this later if you want)
-            # In the real pipeline this is built from FeatureExtractor.graph_builder
             try:
-                # Dummy edge index and attributes
-                # You can leave this as zeros if you just want to run baseline
                 edge_index_np = None
                 edge_attr_np = None
 
-                # If you want to be more realistic, you can reuse graph_builder logic
-                # from the running FeatureExtractor, but for testing, zeros are fine
                 if hasattr(self.feature_extractor, "graph_builder"):
                     edge_index_np, edge_attr_np = self.feature_extractor.graph_builder.get_graph_data()
+
                 if edge_index_np is not None:
                     x_gnn = torch.zeros(
                         (self.feature_extractor.graph_builder.id_counter, GNN_IN_CHANNELS),
                         dtype=torch.float
                     )
                     x_gnn.index_add_(0, torch.tensor(edge_index_np[0], dtype=torch.long),
-                                    torch.tensor(edge_attr_np[:, :GNN_IN_CHANNELS], dtype=torch.float))
+                                        torch.tensor(edge_attr_np[:, :GNN_IN_CHANNELS], dtype=torch.float))
                     with torch.no_grad():
                         z = gnn_model(x_gnn, torch.tensor(edge_index_np, dtype=torch.long))
                         src_id = self.feature_extractor.graph_builder.ip_to_id.get(
@@ -412,16 +410,17 @@ class Detector:
         # 4. Normalize GNN anomaly (same as in _detection_worker)
         normalized_gnn = float(np.tanh(np.log1p(gnn_anomaly_val) / 10.0))
 
-        # 5. MAE error (same as in _detection_worker)
+        # 5. MAE error (commented out to avoid shape error for now)
         mae_err = 0.0
-        if mae_model is not None:
-            with torch.no_grad():
-                feat_tensor = torch.tensor(scaled_features, dtype=torch.float)
-                recon, original = mae_model(feat_tensor, mask_ratio=MAE_MASK_RATIO)
-                mae_err = torch.mean((recon - original)**2).item()
 
-        # 6. Build 95‑dim enhanced features
-        enhanced_features = np.hstack([scaled_features, gnn_vec, [[mae_err]]])  # (1, 95)
+        # if mae_model is not None:
+        #     with torch.no_grad():
+        #         feat_tensor = torch.tensor(scaled_features, dtype=torch.float)
+        #         recon, original = mae_model(feat_tensor, mask_ratio=MAE_MASK_RATIO)
+        #         mae_err = torch.mean((recon - original)**2).item()
+
+        # 6. Build 95‑dim enhanced features (all 2D)
+        enhanced_features = np.hstack([scaled_features, gnn_vec, np.array([[mae_err]])])  # (1, 95)
 
         # 7. CNN prediction (78‑dim)
         cnn_prob = cnn_model.predict(scaled_features, verbose=0)[0][0]  # prob of attack
@@ -438,23 +437,17 @@ class Detector:
         # 11. Autoencoder reconstruction (78‑dim) → zero‑day check
         reconstruction = ae_model.predict(scaled_features, verbose=0)
         ae_mse = np.mean(np.power(scaled_features - reconstruction, 2))
-        # In real pipeline threshold is dynamic from FeatureExtractor
-        # For testing, approximate it; you can read threshold from feature_extractor if you want
+
+        # Threshold logic
         try:
-            # Use the same threshold logic as in _detection_worker
-            # (threshold is computed from recent reconstructions)
             if self.feature_extractor.reconstruction_errors:
-                # Use moving average / percentile if you want
-                # But for testing, hard‑code near actual threshold
                 threshold = self.feature_extractor.compute_dynamic_threshold()
             else:
-                # Just set a safe value that matches your domain
                 threshold = 0.1
         except:
             threshold = 0.1
 
-        # 12. Apply the same labeling logic as in _detection_worker
-
+        # 12. Apply labeling logic
         if ensemble_prob > 0.40:
             label = "known_attack"
             confidence = ensemble_prob
@@ -465,7 +458,7 @@ class Detector:
             label = "normal"
             confidence = 0.0
 
-        # 13. Return same structure as live pipeline
+        # 13. Return results
         return {
             "label": label,
             "confidence": confidence,
@@ -483,5 +476,3 @@ class Detector:
                 "mae_anomaly": mae_err,
             },
         }
-
-    

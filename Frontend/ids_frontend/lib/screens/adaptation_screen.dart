@@ -641,7 +641,6 @@ class _AdaptationScreenState extends State<AdaptationScreen> {
     );
   }
 
-  // --- BOTTOM BAR ---
   Widget _buildBottomBar(BuildContext context, IdsProvider provider) {
     bool hasLabel =
         provider.batchLabel != null && provider.batchLabel!.isNotEmpty;

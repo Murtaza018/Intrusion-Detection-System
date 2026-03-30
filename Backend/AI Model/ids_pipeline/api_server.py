@@ -17,6 +17,8 @@ from cryptography.hazmat.primitives.asymmetric import ec
 from retrain_manager import RetrainManager, JobStatus
 from gan_retrainer import GanRetrainer, JitterRetrainer
 from config import API_KEY
+from detector import Detector
+
 
 
 def calculate_group_consistency(feature_list):
@@ -315,6 +317,50 @@ class APIServer:
             job.phase  = "cancelled"
             job.error  = "Cancelled by user"
             return self._secure_response({"message": f"Job {job.job_id} marked as cancelled."})
+        
+
+        @self.app.route("/api/graph", methods=['GET'])
+        @self._require_api_key
+        def get_graph():
+            """
+            Expose live network graph topology + anomaly hot‑spots.
+            Requires X-API-Key (ECC‑signed JSON response).
+            """
+            try:
+                # Get detector from pipeline_manager
+                if not hasattr(self.pipeline_manager, 'detector'):
+                    return self._secure_response(
+                        {"error": "Detector not initialized"}, 500
+                    )
+
+                detector = self.pipeline_manager.detector
+                if not hasattr(detector, "get_graph_snapshot"):
+                    return self._secure_response(
+                        {"error": "Detector missing get_graph_snapshot method"}, 500
+                    )
+
+                # 1. Get snapshot
+                data = detector.get_graph_snapshot()
+                if data is None:
+                    return self._secure_response(
+                        {"nodes": [], "edges": [], "message": "Graph empty or not initialized."},
+                    )
+
+                # 2. Add metadata (optional, for UI)
+                stats = self.packet_storage.get_stats()
+                data["total_packets"] = stats.get("total_packets", 0)
+                data["threats"] = stats.get("attack_count", 0)
+                data["zero_days"] = stats.get("zero_day_count", 0)
+
+                return self._secure_response(data)
+
+            except Exception as e:
+                traceback.print_exc()
+                return self._secure_response(
+                    {"error": str(e)},
+                    500
+                )
+
 
     def _get_require_api_key_decorator(self):
         return self._require_api_key

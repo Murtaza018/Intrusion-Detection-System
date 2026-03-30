@@ -1,51 +1,31 @@
-1-Add an option for analyst [x] Enable Synthetic Expansion (Jittering).(crucial for CGAN)
-2-Add an option for analyst to add new labels for a specific new zero day attack.(crucial for CGAN)
-3-add an option for analyst to select multiple packets while adding them to a new label.(crucial for CGAN)
-4-when the zero day attack packets are submitted to a new label,the app passes them through AE which checks Infilteration
-    they are all related to each other or not.
-5-give the analyst option to set the pipeline threshold themselves
+Mobile App Functional Features (10+):
 
-1. Detection Sensitivity Preset
-"Choose from pre-configured sensitivity levels: Low for reduced false alarms, Medium for balanced detection, or High for maximum threat visibility during investigations."
+Design a Mobile Monitoring & Alert App for IDS systems, integrating 2–3 core advanced features drawn from future directions above (highlighted with bold):
 
-2. Zero-Day Hunter Sensitivity Slider
-"Adjust how sensitive the AI is to unknown attacks. Lower values catch more subtle anomalies but may increase false alerts. Higher values only flag major deviations."
+1-Real-time Alert Notifications – Push alerts when anomalies detected.
 
-3. Known Attack Confidence Threshold
-"Set the minimum confidence level required to flag known attack patterns. Lower values detect more potential threats, higher values only alert on high-confidence matches."
+2-Visual Explanation Dashboard – Show feature attributions via SHAP/LIME (from Topic 2 & 3 future directions).
 
-4. Alert Volume Control
-"Control how chatty the system is: Quiet mode for critical alerts only, Normal for balanced reporting, or Verbose for maximum visibility during incident response."
+3-Feedback Submission – Users can mark alerts as false positives/negatives, feeding back to retraining (Topic 3).
 
-5. Operational Mode Selector
-"Switch between pre-tuned modes: Business Hours for normal operation, Night Mode for reduced alerts, Incident Response for maximum detection, or Pentest mode for security testing."
+4-Live Network Graph View – Interactive visualization of network graph topology and anomaly hot-spots (Topic 2).
 
-6. Advanced Autoencoder Settings Panel
-"Fine-tune the statistical engine: adjust how many standard deviations from normal trigger alerts, what percentile of normal traffic sets the baseline, and how much learning data is required."
+5-Adaptive Sensitivity Control – Use insights from explanations to adjust detection thresholds dynamically (Topic 3).
 
-7. Time-Based Auto-Adjustment Toggle
-"Automatically lower sensitivity during business hours when traffic is expected, and raise it at night when any activity is more suspicious."
+6-Embedded Self-Supervised Module – Lightweight MAE-based anomaly embedding engine runs locally for preliminary filtering (Topic 1).
 
-8. Threshold Profile Manager
-"Save and load your favorite threshold combinations for different scenarios - create profiles for 'Quiet Nights', 'Active Monitoring', or 'Security Audits'."
+7-Continual Learning Updates – App periodically receives model updates reflecting streaming data learning (Topic 1).
 
-9. Live Threshold Visualization
-"See real-time graphs showing current traffic patterns against your detection thresholds - watch how normal traffic behaves and where anomalies appear."
+8-Edge Device Sync – Sync with edge nodes (e.g., routers) that run ensemble IDS components (Topic 2).
 
-10. One-Click Threshold Deployment
-"Apply new sensitivity settings immediately without restarting the detection pipeline - see changes take effect in real-time."
+9-Historical Alert Analytics – Trend charts of intrusion types, volume, and performance metrics.
 
-11. Factory Reset Button
-"Instantly restore all thresholds to safe default values with a single click if you've made things too sensitive or missed something important."
+10-User-Configurable Alerts – Set custom filters (by severity, type, source IP).
 
-12. Impact Preview Display
-"See how your current threshold settings would have classified recent network traffic - understand the trade-off between detection and false alarms before committing."
+11-Explainable Summary Reports – Generate daily/weekly summaries with explainability insights.
 
-13. Analyst Notes Field
-"Add comments to your threshold profiles explaining why you chose these settings - perfect for team handovers or compliance documentation."
+12-Edge-Local Computation – Run lightweight detection directly on-device for offline alerting (Topic 1).
 
-14. Threshold History Timeline
-"Review how your sensitivity settings have evolved over time and which configurations worked best during past security incidents."
+13-Secure Authentication & Encryption – Protect app communications with IDS backend.
 
-15. Export Threshold Settings
-"Share your finely-tuned detection profiles with other team members or backup your optimal configurations for disaster recovery."
+14-Model Update Management – Notifications and progress for when new detection model versions are downloaded (Topics 1 & 2).

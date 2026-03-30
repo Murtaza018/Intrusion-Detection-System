@@ -1,6 +1,6 @@
 import numpy as np
-import networkx as nx
 from collections import deque
+
 
 class GraphBuilder:
     def __init__(self, window_size=1000):
@@ -15,28 +15,46 @@ class GraphBuilder:
             self.id_counter += 1
         return self.ip_to_id[ip]
 
-    def add_packet(self, packet_info, features):
+    def add_packet(self, packet_info, features, ae_mse=None, mae_err=None, gnn_anomaly=None):
         """
-        packet_info: dict from your _get_packet_info (src_ip, dst_ip, etc.)
-        features: the scaled feature vector from your extractor
+        packet_info: dict with src_ip, dst_ip
+        features: 78‑dim scaled feature vector
+        ae_mse / mae_err / gnn_anomaly: optional anomaly scores
         """
         src_id = self._get_node_id(packet_info['src_ip'])
         dst_id = self._get_node_id(packet_info['dst_ip'])
-        
-        # Store edge data: (source, destination, feature_vector)
-        self.packet_buffer.append((src_id, dst_id, features))
+
+        # Anomaly score for this edge (could be one of several; pick one or composite)
+        anomaly = gnn_anomaly or ae_mse or mae_err or 0.0
+
+        self.packet_buffer.append((src_id, dst_id, features, float(anomaly)))
 
     def get_graph_data(self):
-        """Returns the data structure needed for GNN training/inference"""
+        """
+        Returns:
+            edge_index: (2, N_edges)
+            edge_attr: (N_edges, N_feature_dims)
+            node_anomaly: dict {node_id: mean anomaly}
+        """
         if len(self.packet_buffer) < 10:
-            return None, None
+            return None, None, {}
 
-        # Create edge list for GNN (e.g., PyTorch Geometric format)
         edge_index = []
         edge_attr = []
-        
-        for src, dst, feat in self.packet_buffer:
+        node_anomaly = {}
+
+        for src, dst, feat, anom in self.packet_buffer:
             edge_index.append([src, dst])
             edge_attr.append(feat)
+            node_anomaly[src] = node_anomaly.get(src, 0.0) + anom
+            node_anomaly[dst] = node_anomaly.get(dst, 0.0) + anom
 
-        return np.array(edge_index).T, np.array(edge_attr)
+        # Normalize node anomalies
+        for nid in node_anomaly:
+            node_anomaly[nid] /= len(node_anomaly)
+
+        return (
+            np.array(edge_index).T,
+            np.array(edge_attr),
+            node_anomaly,
+        )

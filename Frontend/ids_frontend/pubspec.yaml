@@ -19,6 +19,7 @@ dependencies:
   hex: ^0.2.0
   pointycastle: ^3.7.3
   crypto: ^3.0.3
+  flutter_hooks: ^0.20.4
 
 dev_dependencies:
   flutter_test:

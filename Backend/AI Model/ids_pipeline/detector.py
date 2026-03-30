@@ -126,7 +126,7 @@ class Detector:
                 
                 if self.feature_extractor.is_scaling_enabled():
                     # --- [SENSORY LAYER 1: GNN TOPOLOGY] ---
-                    edge_index_np, edge_attr_np = self.feature_extractor.graph_builder.get_graph_data()
+                    edge_index_np, edge_attr_np,node_anomaly = self.feature_extractor.graph_builder.get_graph_data()
                     gnn_vec = np.zeros((1, GNN_EMBEDDING_DIM))
                     
                     if edge_index_np is not None and gnn_model is not None:
@@ -162,6 +162,18 @@ class Detector:
                     # 32,000 -> ~0.99 (99%)
                     normalized_gnn = float(np.tanh(np.log1p(raw_gnn_val) / 10.0))
 
+                    # 1. Update graph_builder with anomaly
+                   
+                    if self.feature_extractor.graph_builder is not None:
+                        self.feature_extractor.graph_builder.add_packet(
+                            packet_info=packet_info,
+                            features=scaled_features[0],  # 78‑dim
+                            gnn_anomaly=normalized_gnn,
+                            ae_mse=mse if 'mse' in locals() else 0.0,
+                            mae_err=mae_err,
+                        )
+
+
                     extra_metrics = {
                         "gnn_anomaly": normalized_gnn,
                         "mae_anomaly": mae_err
@@ -169,9 +181,11 @@ class Detector:
 
                     # --- [ENSEMBLE CLASSIFICATION] ---
                     cnn_prob = self.model_loader.get_main_model().predict(scaled_features, verbose=0)[0][0]
-                    rf_prob = 1.0 - self.model_loader.get_rf_model().predict_proba(enhanced_features)[0][0]
-                    xgb_prob = 1.0 - self.model_loader.get_xgb_model().predict_proba(enhanced_features)[0][0]
-                    
+                   
+                    rf_prob = self.model_loader.get_rf_model().predict_proba(enhanced_features)[0][1]  # Attack class
+                    xgb_prob = self.model_loader.get_xgb_model().predict_proba(enhanced_features)[0][1]  # Attack class
+
+
                     ensemble_prob = max(cnn_prob, rf_prob, xgb_prob)
                     
                     # if packet_id % 50 == 0:
@@ -338,6 +352,49 @@ class Detector:
 
             
         )
+    
+    def get_graph_snapshot(self):
+        """
+        Used by API server to expose current graph topology + anomaly.
+        """
+        if not hasattr(self.feature_extractor, 'graph_builder'):
+            return None
+
+        graph_builder = self.feature_extractor.graph_builder
+        edge_index, edge_attr, node_anomaly = graph_builder.get_graph_data()
+        if edge_index is None:
+            return None
+
+        ip_to_id = graph_builder.ip_to_id
+        id_to_ip = {v: k for k, v in ip_to_id.items()}
+
+        nodes = []
+        for ip, nid in ip_to_id.items():
+            anomaly = node_anomaly.get(nid, 0.0)
+            nodes.append({
+                "id": nid,
+                "ip": ip,
+                "anomaly": float(anomaly),
+            })
+
+        edges = []
+        for i in range(edge_index.shape[1]):
+            src = int(edge_index[0, i])
+            dst = int(edge_index[1, i])
+            edges.append({
+                "source": src,
+                "target": dst,
+                "weight": 1.0,
+            })
+
+        return {
+            "nodes": nodes,
+            "edges": edges,
+            "timestamp": datetime.now().timestamp(),
+        }
+
+
+
     def classify_features_pipeline(self, raw_features: np.ndarray, extra_info=None):
         """
         Run the EXACT SAME detection logic as _detection_worker on a 78‑dim feature vector.
@@ -386,7 +443,7 @@ class Detector:
                 edge_attr_np = None
 
                 if hasattr(self.feature_extractor, "graph_builder"):
-                    edge_index_np, edge_attr_np = self.feature_extractor.graph_builder.get_graph_data()
+                    edge_index_np, edge_attr_np,node_anomaly = self.feature_extractor.graph_builder.get_graph_data()
 
                 if edge_index_np is not None:
                     x_gnn = torch.zeros(

@@ -24,7 +24,7 @@ class NetworkGraphService {
     if (response.statusCode != 200) {
       throw Exception('Graph fetch failed: ${response.statusCode}');
     }
-
+    print('RAW GRAPH JSON: ${response.body}');
     final body = jsonDecode(response.body);
     final payload = body['payload'] as Map<String, dynamic>; // ECC wrapper
 

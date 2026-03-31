@@ -5,111 +5,105 @@ import '../models/node.dart';
 import '../models/edge.dart';
 
 class GraphLayoutService {
-  /// Applies a force-directed layout algorithm to position nodes
+  /// Force-directed (Fruchterman-Reingold style) layout.
+  ///
+  /// Key tuning levers:
+  ///  • [initialRadius]   — how wide the starting circle is. Larger = nodes
+  ///                        start farther apart and end up farther apart.
+  ///  • [repulsionStrength] — how hard nodes push each other away.
+  ///  • [attractionStrength] — spring constant pulling connected nodes together.
+  ///  • [minDistance]     — hard floor: no two nodes end up closer than this
+  ///                        in world-space, so zooming in always shows space.
   static GraphData applyForceDirectedLayout(
     GraphData graphData, {
-    int iterations = 100,
-    double repulsionStrength = 1000.0,
-    double attractionStrength = 0.1,
-    double damping = 0.85,
+    int iterations = 150,
+    double repulsionStrength = 8000.0,
+    double attractionStrength = 0.06,
+    double damping = 0.82,
+    double initialRadius = 600.0,
+    double minDistance = 80.0, // world-space minimum gap between node centres
   }) {
     if (graphData.nodes.isEmpty) return graphData;
 
-    final random = math.Random(42); // Fixed seed for consistency
-    final positions = <int, _Vector2D>{};
-    final velocities = <int, _Vector2D>{};
+    final n = graphData.nodes.length;
+    final random = math.Random(42);
+    final positions = <int, _Vec2>{};
+    final velocities = <int, _Vec2>{};
 
-    // Initialize positions randomly in a circle
-    for (int i = 0; i < graphData.nodes.length; i++) {
+    // Place nodes evenly on a circle with a small random jitter so no two
+    // nodes start exactly on top of each other.
+    for (int i = 0; i < n; i++) {
       final node = graphData.nodes[i];
-      final angle = (i / graphData.nodes.length) * 2 * math.pi;
-      final radius = 200.0 + random.nextDouble() * 100;
-
-      positions[node.id] = _Vector2D(
-        math.cos(angle) * radius,
-        math.sin(angle) * radius,
+      final angle = (i / n) * 2 * math.pi;
+      // Stagger inner/outer rings for denser graphs so layout converges faster.
+      final ring = initialRadius * (0.6 + (i % 3) * 0.25) +
+          random.nextDouble() * initialRadius * 0.15;
+      positions[node.id] = _Vec2(
+        math.cos(angle) * ring,
+        math.sin(angle) * ring,
       );
-      velocities[node.id] = _Vector2D(0, 0);
+      velocities[node.id] = _Vec2(0, 0);
     }
 
-    // Create adjacency map for faster lookup
-    final adjacency = <int, Set<int>>{};
-    for (final edge in graphData.edges) {
-      adjacency.putIfAbsent(edge.source, () => {}).add(edge.target);
-      adjacency.putIfAbsent(edge.target, () => {}).add(edge.source);
-    }
-
-    // Force-directed iterations
+    // ── Main simulation loop ──────────────────────────────────────────────
     for (int iter = 0; iter < iterations; iter++) {
-      final forces = <int, _Vector2D>{};
+      final forces = <int, _Vec2>{
+        for (final node in graphData.nodes) node.id: _Vec2(0, 0)
+      };
 
-      // Initialize forces
-      for (final node in graphData.nodes) {
-        forces[node.id] = _Vector2D(0, 0);
-      }
+      // Cooling temperature: starts at 1.0, ends at 0.0.
+      final temp = 1.0 - (iter / iterations);
 
-      // Repulsion between all nodes (like charged particles)
-      for (int i = 0; i < graphData.nodes.length; i++) {
-        for (int j = i + 1; j < graphData.nodes.length; j++) {
-          final pos1 = positions[graphData.nodes[i].id]!;
-          final pos2 = positions[graphData.nodes[j].id]!;
+      // Repulsion (O(n²) — acceptable for n ≤ 100)
+      for (int i = 0; i < n; i++) {
+        for (int j = i + 1; j < n; j++) {
+          final id1 = graphData.nodes[i].id;
+          final id2 = graphData.nodes[j].id;
+          final delta = positions[id1]! - positions[id2]!;
+          final dist = delta.length();
 
-          final delta = pos1 - pos2;
-          final distance = delta.length();
-
-          if (distance < 0.1) {
-            // If they are on top of each other, push them apart in a random direction
-            final randomDir =
-                _Vector2D(random.nextDouble() - 0.5, random.nextDouble() - 0.5)
+          _Vec2 force;
+          if (dist < 0.1) {
+            // Exactly overlapping — push in a random direction.
+            final dir =
+                _Vec2(random.nextDouble() - 0.5, random.nextDouble() - 0.5)
                     .normalized();
-            final force = randomDir * repulsionStrength;
-            forces[graphData.nodes[i].id] =
-                forces[graphData.nodes[i].id]! + force;
-            forces[graphData.nodes[j].id] =
-                forces[graphData.nodes[j].id]! - force;
+            force = dir * repulsionStrength;
           } else {
-            // FIX: Clamp the repulsion force magnitude to prevent blow-up.
-            // Without this, small distances (e.g. 0.11) produce enormous forces
-            // (2000 / 0.0121 ≈ 165,000) that compound over iterations into Infinity/NaN.
-            final forceMag = (repulsionStrength / (distance * distance))
-                .clamp(0.0, repulsionStrength * 2);
-            final force = delta.normalized() * forceMag;
-            forces[graphData.nodes[i].id] =
-                forces[graphData.nodes[i].id]! + force;
-            forces[graphData.nodes[j].id] =
-                forces[graphData.nodes[j].id]! - force;
+            // Standard inverse-square repulsion, clamped to avoid blow-up.
+            final mag = (repulsionStrength / (dist * dist))
+                .clamp(0.0, repulsionStrength * 2.0);
+            force = delta.normalized() * mag;
           }
+
+          forces[id1] = forces[id1]! + force;
+          forces[id2] = forces[id2]! - force;
         }
       }
 
-      // Attraction between connected nodes (like springs)
+      // Attraction along edges (spring model)
       for (final edge in graphData.edges) {
-        final pos1 = positions[edge.source];
-        final pos2 = positions[edge.target];
+        final p1 = positions[edge.source];
+        final p2 = positions[edge.target];
+        if (p1 == null || p2 == null) continue;
 
-        if (pos1 == null || pos2 == null) continue;
+        final delta = p2 - p1;
+        final dist = delta.length();
+        if (dist < 0.1) continue;
 
-        final delta = pos2 - pos1;
-        final distance = delta.length();
-
-        if (distance > 0.1) {
-          final force = delta.normalized() *
-              (distance * attractionStrength * edge.weight);
-          forces[edge.source] = forces[edge.source]! + force;
-          forces[edge.target] = forces[edge.target]! - force;
-        }
+        final mag = dist * attractionStrength * edge.weight;
+        final force = delta.normalized() * mag;
+        forces[edge.source] = forces[edge.source]! + force;
+        forces[edge.target] = forces[edge.target]! - force;
       }
 
-      // Apply forces with damping
-      final temp = 1.0 - (iter / iterations); // Temperature decreases over time
+      // Integrate with velocity damping + temperature cooling
       for (final node in graphData.nodes) {
         var vel = (velocities[node.id]! + forces[node.id]!) * damping * temp;
 
-        // FIX: Clamp velocity each iteration to prevent exponential blow-up.
-        // Accumulated repulsion forces can push velocities toward Infinity over
-        // many iterations; a hard cap keeps positions finite and canvas-safe.
-        const maxVel = 50.0;
-        vel = _Vector2D(
+        // Hard velocity cap to prevent runaway
+        const maxVel = 80.0;
+        vel = _Vec2(
           vel.x.clamp(-maxVel, maxVel),
           vel.y.clamp(-maxVel, maxVel),
         );
@@ -117,13 +111,34 @@ class GraphLayoutService {
         velocities[node.id] = vel;
         positions[node.id] = positions[node.id]! + vel;
       }
+
+      // ── Minimum distance enforcement ──────────────────────────────────
+      // After each integration step, push any pair of nodes that ended up
+      // closer than minDistance apart back to that minimum separation.
+      // This guarantees there is always visible space between nodes at any
+      // zoom level, preventing the "clumped blob" appearance.
+      for (int i = 0; i < n; i++) {
+        for (int j = i + 1; j < n; j++) {
+          final id1 = graphData.nodes[i].id;
+          final id2 = graphData.nodes[j].id;
+          final delta = positions[id1]! - positions[id2]!;
+          final dist = delta.length();
+          if (dist < minDistance && dist > 0.001) {
+            final push = delta.normalized() * ((minDistance - dist) / 2.0);
+            positions[id1] = positions[id1]! + push;
+            positions[id2] = positions[id2]! - push;
+          } else if (dist < 0.001) {
+            // Exact overlap fallback
+            positions[id1] = positions[id1]! +
+                _Vec2(random.nextDouble() * minDistance,
+                    random.nextDouble() * minDistance);
+          }
+        }
+      }
     }
 
-    // Create new nodes with updated positions.
-    // FIX: Sanitize positions before handing them to the painter.
-    // If Infinity or NaN slipped through (e.g. via a degenerate graph),
-    // Flutter's CanvasKit validator will throw on the very first drawCircle/drawLine call.
-    final updatedNodes = graphData.nodes.map((node) {
+    // Sanitise and return
+    final updated = graphData.nodes.map((node) {
       final pos = positions[node.id]!;
       return node.copyWith(
         x: pos.x.isFinite ? pos.x : 0.0,
@@ -132,63 +147,46 @@ class GraphLayoutService {
     }).toList();
 
     return GraphData(
-      nodes: updatedNodes,
+      nodes: updated,
       edges: graphData.edges,
       timestamp: graphData.timestamp,
     );
   }
 
-  /// Applies a circular layout (simple but effective)
+  // ── Other layouts (unchanged) ─────────────────────────────────────────────
+
   static GraphData applyCircularLayout(GraphData graphData,
       {double radius = 300.0}) {
     if (graphData.nodes.isEmpty) return graphData;
-
-    final updatedNodes = <GraphNode>[];
-
+    final updated = <GraphNode>[];
     for (int i = 0; i < graphData.nodes.length; i++) {
-      final node = graphData.nodes[i];
       final angle = (i / graphData.nodes.length) * 2 * math.pi;
-
-      updatedNodes.add(node.copyWith(
+      updated.add(graphData.nodes[i].copyWith(
         x: math.cos(angle) * radius,
         y: math.sin(angle) * radius,
       ));
     }
-
     return GraphData(
-      nodes: updatedNodes,
-      edges: graphData.edges,
-      timestamp: graphData.timestamp,
-    );
+        nodes: updated, edges: graphData.edges, timestamp: graphData.timestamp);
   }
 
-  /// Applies a grid layout
   static GraphData applyGridLayout(GraphData graphData,
       {double spacing = 150.0}) {
     if (graphData.nodes.isEmpty) return graphData;
-
-    final updatedNodes = <GraphNode>[];
+    final updated = <GraphNode>[];
     final cols = math.sqrt(graphData.nodes.length).ceil();
-
     for (int i = 0; i < graphData.nodes.length; i++) {
-      final node = graphData.nodes[i];
       final row = i ~/ cols;
       final col = i % cols;
-
-      updatedNodes.add(node.copyWith(
+      updated.add(graphData.nodes[i].copyWith(
         x: col * spacing - (cols * spacing / 2),
         y: row * spacing - (cols * spacing / 2),
       ));
     }
-
     return GraphData(
-      nodes: updatedNodes,
-      edges: graphData.edges,
-      timestamp: graphData.timestamp,
-    );
+        nodes: updated, edges: graphData.edges, timestamp: graphData.timestamp);
   }
 
-  /// Applies a hierarchical layout based on connectivity
   static GraphData applyHierarchicalLayout(
     GraphData graphData, {
     double levelSpacing = 200.0,
@@ -196,26 +194,21 @@ class GraphLayoutService {
   }) {
     if (graphData.nodes.isEmpty) return graphData;
 
-    // Build adjacency list
     final adjacency = <int, List<int>>{};
     final inDegree = <int, int>{};
-
     for (final node in graphData.nodes) {
       adjacency[node.id] = [];
       inDegree[node.id] = 0;
     }
-
     for (final edge in graphData.edges) {
       adjacency[edge.source]?.add(edge.target);
       inDegree[edge.target] = (inDegree[edge.target] ?? 0) + 1;
     }
 
-    // Topological sort to determine levels
     final levels = <int, List<int>>{};
     final nodeLevel = <int, int>{};
     final queue = <int>[];
 
-    // Start with nodes that have no incoming edges
     for (final node in graphData.nodes) {
       if (inDegree[node.id] == 0) {
         queue.add(node.id);
@@ -223,8 +216,6 @@ class GraphLayoutService {
         levels.putIfAbsent(0, () => []).add(node.id);
       }
     }
-
-    // If no starting nodes, just use the first node
     if (queue.isEmpty && graphData.nodes.isNotEmpty) {
       final firstId = graphData.nodes.first.id;
       queue.add(firstId);
@@ -235,7 +226,6 @@ class GraphLayoutService {
     while (queue.isNotEmpty) {
       final nodeId = queue.removeAt(0);
       final level = nodeLevel[nodeId]!;
-
       for (final neighborId in adjacency[nodeId] ?? []) {
         if (!nodeLevel.containsKey(neighborId)) {
           nodeLevel[neighborId] = level + 1;
@@ -245,61 +235,53 @@ class GraphLayoutService {
       }
     }
 
-    // Assign positions based on levels
-    final updatedNodes = <GraphNode>[];
-    final nodeMap = <int, GraphNode>{};
-    for (final node in graphData.nodes) {
-      nodeMap[node.id] = node;
-    }
+    final nodeMap = <int, GraphNode>{for (final n in graphData.nodes) n.id: n};
+    final updated = <GraphNode>[];
 
     for (final entry in levels.entries) {
-      final level = entry.key;
       final nodesInLevel = entry.value;
-      final y = level * levelSpacing;
-
+      final y = entry.key * levelSpacing;
       for (int i = 0; i < nodesInLevel.length; i++) {
-        final nodeId = nodesInLevel[i];
-        final node = nodeMap[nodeId];
+        final node = nodeMap[nodesInLevel[i]];
         if (node != null) {
-          final x = (i - nodesInLevel.length / 2) * nodeSpacing;
-          updatedNodes.add(node.copyWith(x: x, y: y));
+          updated.add(node.copyWith(
+            x: (i - nodesInLevel.length / 2) * nodeSpacing,
+            y: y,
+          ));
         }
       }
     }
 
-    // Add any nodes that weren't processed (disconnected nodes)
+    final random = math.Random(0);
     for (final node in graphData.nodes) {
       if (!nodeLevel.containsKey(node.id)) {
-        updatedNodes.add(node.copyWith(
-          x: math.Random().nextDouble() * 400 - 200,
-          y: math.Random().nextDouble() * 400 - 200,
+        updated.add(node.copyWith(
+          x: random.nextDouble() * 400 - 200,
+          y: random.nextDouble() * 400 - 200,
         ));
       }
     }
 
     return GraphData(
-      nodes: updatedNodes,
-      edges: graphData.edges,
-      timestamp: graphData.timestamp,
-    );
+        nodes: updated, edges: graphData.edges, timestamp: graphData.timestamp);
   }
 }
 
-/// Helper class for 2D vector operations
-class _Vector2D {
+// ── 2D vector helper ──────────────────────────────────────────────────────────
+
+class _Vec2 {
   final double x;
   final double y;
-
-  _Vector2D(this.x, this.y);
+  const _Vec2(this.x, this.y);
 
   double length() => math.sqrt(x * x + y * y);
 
-  _Vector2D normalized() {
-    final len = length();
-    return len > 0 ? _Vector2D(x / len, y / len) : _Vector2D(0, 0);
+  _Vec2 normalized() {
+    final l = length();
+    return l > 0 ? _Vec2(x / l, y / l) : const _Vec2(0, 0);
   }
 
-  _Vector2D operator +(_Vector2D other) => _Vector2D(x + other.x, y + other.y);
-  _Vector2D operator -(_Vector2D other) => _Vector2D(x - other.x, y - other.y);
-  _Vector2D operator *(double scalar) => _Vector2D(x * scalar, y * scalar);
+  _Vec2 operator +(_Vec2 o) => _Vec2(x + o.x, y + o.y);
+  _Vec2 operator -(_Vec2 o) => _Vec2(x - o.x, y - o.y);
+  _Vec2 operator *(double s) => _Vec2(x * s, y * s);
 }

@@ -1,15 +1,20 @@
-// lib/widgets/graph_view_widget.dart - OPTIMIZED FOR NETWORK ANOMALY DETECTION
+// lib/widgets/graph_view_widget.dart
+import 'dart:collection' show LinkedHashMap;
+import 'dart:math' as math;
 import 'package:flutter/foundation.dart' show setEquals;
 import 'package:flutter/material.dart';
 import '../models/graph_data.dart';
 import '../models/node.dart';
 import '../models/edge.dart';
 import '../services/graph_layout_service.dart';
-import 'dart:math' as math;
 
 class GraphViewWidget extends StatefulWidget {
   final GraphData graphData;
   final Size size;
+
+  /// Rolling-window cap. When a new node arrives and the window is full,
+  /// the oldest node (by first-seen order) is evicted.
+  static const int kMaxNodes = 60;
 
   const GraphViewWidget({
     Key? key,
@@ -31,10 +36,9 @@ class _GraphViewWidgetState extends State<GraphViewWidget>
   Set<int> _highlightedNodes = {};
   late GraphData _layoutGraphData;
 
-  // FIX (infinite layout loop): Track which node-ID set has already been laid
-  // out. graphStream() emits fresh GraphData every 2 s with nodes at (0,0),
-  // so without this guard didUpdateWidget → _applyLayout fires on every tick
-  // and the expensive force-directed pass runs continuously.
+  // Insertion-ordered map: node.id → fully positioned GraphNode.
+  // LinkedHashMap preserves insertion order so we can evict the oldest key.
+  final LinkedHashMap<int, GraphNode> _nodeWindow = LinkedHashMap();
   Set<int> _laidOutNodeIds = {};
 
   @override
@@ -45,11 +49,10 @@ class _GraphViewWidgetState extends State<GraphViewWidget>
       vsync: this,
     )..repeat(reverse: true);
 
+    _layoutGraphData =
+        GraphData(nodes: const [], edges: const [], timestamp: 0);
     _applyLayout();
-
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _autoFit();
-    });
+    WidgetsBinding.instance.addPostFrameCallback((_) => _autoFit());
   }
 
   @override
@@ -66,76 +69,95 @@ class _GraphViewWidgetState extends State<GraphViewWidget>
     }
   }
 
-  /// Normalise a raw anomaly value to [0.0, 1.0].
-  /// Backend sends scores in 0–3 range. Values above 1.0 are genuine
-  /// high-anomaly scores (not percentage encoding), so we simply clamp.
-  double _normaliseAnomaly(double raw) => raw.clamp(0.0, 1.0);
+  // ── Normalisation ────────────────────────────────────────────────────────
+  double _norm(double raw) => raw.clamp(0.0, 1.0);
 
-  void _applyLayout() {
-    final incomingIds = widget.graphData.nodes.map((n) => n.id).toSet();
-
-    // FIX: Use setEquals() for content-based Set comparison.
-    // Dart's != on two Set objects compares by *identity*, so two Sets with
-    // identical elements are always != — causing layout to re-run every tick.
-    final topologyChanged = !setEquals(incomingIds, _laidOutNodeIds);
-
-    if (topologyChanged) {
-      final needsPositioning = widget.graphData.nodes.every(
-        (node) => node.x.abs() < 0.1 && node.y.abs() < 0.1,
-      );
-
-      GraphData positioned;
-      if (needsPositioning && widget.graphData.nodes.isNotEmpty) {
-        print('Applying force-directed layout for ${incomingIds.length} nodes');
-        positioned = GraphLayoutService.applyForceDirectedLayout(
-          widget.graphData,
-          iterations: 150,
-          repulsionStrength: 2000.0,
-          attractionStrength: 0.15,
-        );
+  // ── Rolling window ───────────────────────────────────────────────────────
+  void _mergeIntoWindow(List<GraphNode> incoming) {
+    for (final node in incoming) {
+      if (_nodeWindow.containsKey(node.id)) {
+        // Update anomaly in-place, keep existing position.
+        final existing = _nodeWindow[node.id]!;
+        _nodeWindow[node.id] = existing.copyWith(anomaly: _norm(node.anomaly));
       } else {
-        positioned = widget.graphData;
+        // New node: add with raw position (layout will assign x/y later).
+        _nodeWindow[node.id] = node.copyWith(anomaly: _norm(node.anomaly));
       }
-
-      // Normalise anomaly on the freshly laid-out nodes too.
-      _layoutGraphData = GraphData(
-        nodes: positioned.nodes
-            .map((n) => n.copyWith(anomaly: _normaliseAnomaly(n.anomaly)))
-            .toList(),
-        edges: positioned.edges,
-        timestamp: positioned.timestamp,
-      );
-
-      _laidOutNodeIds = incomingIds;
-      WidgetsBinding.instance.addPostFrameCallback((_) => _autoFit());
-    } else {
-      // Same topology — keep positions, refresh anomaly scores only.
-      final updatedAnomalyMap = {
-        for (final n in widget.graphData.nodes) n.id: n.anomaly
-      };
-
-      _layoutGraphData = GraphData(
-        nodes: _layoutGraphData.nodes.map((n) {
-          final raw = updatedAnomalyMap[n.id] ?? n.anomaly;
-          return n.copyWith(anomaly: _normaliseAnomaly(raw));
-        }).toList(),
-        edges: _layoutGraphData.edges,
-        timestamp: widget.graphData.timestamp,
-      );
+    }
+    // Evict oldest while over cap.
+    while (_nodeWindow.length > GraphViewWidget.kMaxNodes) {
+      _nodeWindow.remove(_nodeWindow.keys.first);
     }
   }
 
-  void _autoFit() {
-    if (_layoutGraphData.nodes.isEmpty) return;
+  // ── Layout ───────────────────────────────────────────────────────────────
+  void _applyLayout() {
+    _mergeIntoWindow(widget.graphData.nodes);
 
-    final bounds = _calculateBounds();
-    if (bounds.width == 0 || bounds.height == 0) return;
+    final currentIds = _nodeWindow.keys.toSet();
+    final topologyChanged = !setEquals(currentIds, _laidOutNodeIds);
+
+    // Keep only edges whose both endpoints are in the window.
+    final filteredEdges = widget.graphData.edges
+        .where((e) =>
+            currentIds.contains(e.source) && currentIds.contains(e.target))
+        .toList();
+
+    if (topologyChanged) {
+      // Nodes that already have a position keep it; only brand-new nodes
+      // start at (0,0) and will be repositioned by the layout pass.
+      final nodeList = _nodeWindow.values.toList();
+      final allAtOrigin =
+          nodeList.every((n) => n.x.abs() < 0.1 && n.y.abs() < 0.1);
+
+      GraphData positioned;
+      if (allAtOrigin && nodeList.isNotEmpty) {
+        positioned = GraphLayoutService.applyForceDirectedLayout(
+          GraphData(
+              nodes: nodeList,
+              edges: filteredEdges,
+              timestamp: widget.graphData.timestamp),
+          // Higher repulsion + lower attraction = nodes spread far apart
+          // in world-space so zooming in always reveals clear separation.
+          iterations: 150,
+          repulsionStrength: 8000.0,
+          attractionStrength: 0.06,
+          initialRadius: 600.0,
+          minDistance: 80.0,
+        );
+      } else {
+        positioned = GraphData(
+            nodes: nodeList,
+            edges: filteredEdges,
+            timestamp: widget.graphData.timestamp);
+      }
+
+      // Write positions back into the window.
+      for (final n in positioned.nodes) {
+        _nodeWindow[n.id] = n.copyWith(anomaly: _norm(n.anomaly));
+      }
+
+      _laidOutNodeIds = currentIds;
+      WidgetsBinding.instance.addPostFrameCallback((_) => _autoFit());
+    }
 
     setState(() {
-      final scaleX = (widget.size.width - 100) / bounds.width;
-      final scaleY = (widget.size.height - 100) / bounds.height;
-      _scale = math.min(scaleX, scaleY).clamp(0.3, 3.0);
+      _layoutGraphData = GraphData(
+        nodes: _nodeWindow.values.toList(),
+        edges: filteredEdges,
+        timestamp: widget.graphData.timestamp,
+      );
+    });
+  }
 
+  // ── Viewport ─────────────────────────────────────────────────────────────
+  void _autoFit() {
+    final bounds = _calculateBounds();
+    if (bounds.width == 0 || bounds.height == 0) return;
+    setState(() {
+      final sx = (widget.size.width - 120) / bounds.width;
+      final sy = (widget.size.height - 120) / bounds.height;
+      _scale = math.min(sx, sy).clamp(0.2, 3.0);
       _panOffset = Offset(
         widget.size.width / 2 - bounds.center.dx * _scale,
         widget.size.height / 2 - bounds.center.dy * _scale,
@@ -145,471 +167,309 @@ class _GraphViewWidgetState extends State<GraphViewWidget>
 
   Rect _calculateBounds() {
     if (_layoutGraphData.nodes.isEmpty) return Rect.zero;
-
     double minX = double.infinity, minY = double.infinity;
     double maxX = double.negativeInfinity, maxY = double.negativeInfinity;
-
-    for (final node in _layoutGraphData.nodes) {
-      if (!node.x.isFinite || !node.y.isFinite) continue;
-      minX = math.min(minX, node.x);
-      minY = math.min(minY, node.y);
-      maxX = math.max(maxX, node.x);
-      maxY = math.max(maxY, node.y);
+    for (final n in _layoutGraphData.nodes) {
+      if (!n.x.isFinite || !n.y.isFinite) continue;
+      minX = math.min(minX, n.x);
+      minY = math.min(minY, n.y);
+      maxX = math.max(maxX, n.x);
+      maxY = math.max(maxY, n.y);
     }
-
-    if (!minX.isFinite || !minY.isFinite || !maxX.isFinite || !maxY.isFinite) {
-      return Rect.zero;
-    }
-
-    const padding = 50.0;
-    return Rect.fromLTRB(
-      minX - padding,
-      minY - padding,
-      maxX + padding,
-      maxY + padding,
-    );
+    if (!minX.isFinite) return Rect.zero;
+    const p = 60.0;
+    return Rect.fromLTRB(minX - p, minY - p, maxX + p, maxY + p);
   }
 
-  int _attackCount() =>
-      _layoutGraphData.nodes.where((node) => node.anomaly > 0.3).length;
+  void _zoomBy(double factor) =>
+      setState(() => _scale = (_scale * factor).clamp(0.1, 8.0));
 
-  int _criticalCount() =>
-      _layoutGraphData.nodes.where((node) => node.anomaly > 0.6).length;
-
+  // ── Selection ─────────────────────────────────────────────────────────────
   void _onNodeTap(GraphNode node) {
     setState(() {
       _selectedNode = node;
-      _highlightedNodes.clear();
-
-      for (final edge in _layoutGraphData.edges) {
-        if (edge.source == node.id) {
-          _highlightedNodes.add(edge.target);
-        } else if (edge.target == node.id) {
-          _highlightedNodes.add(edge.source);
-        }
+      _highlightedNodes = {node.id};
+      for (final e in _layoutGraphData.edges) {
+        if (e.source == node.id) _highlightedNodes.add(e.target);
+        if (e.target == node.id) _highlightedNodes.add(e.source);
       }
-      _highlightedNodes.add(node.id);
     });
   }
 
-  void _clearSelection() {
-    setState(() {
-      _selectedNode = null;
-      _highlightedNodes.clear();
-    });
+  void _clearSelection() => setState(() {
+        _selectedNode = null;
+        _highlightedNodes = {};
+      });
+
+  // ── Stats helpers ─────────────────────────────────────────────────────────
+  int get _criticalCount =>
+      _layoutGraphData.nodes.where((n) => n.anomaly > 0.6).length;
+  int get _warningCount => _layoutGraphData.nodes
+      .where((n) => n.anomaly > 0.3 && n.anomaly <= 0.6)
+      .length;
+  double get _avgAnomaly => _layoutGraphData.nodes.isEmpty
+      ? 0
+      : _layoutGraphData.nodes.fold(0.0, (s, n) => s + n.anomaly) /
+          _layoutGraphData.nodes.length;
+
+  // ── Degree map (number of connections per node) ───────────────────────────
+  Map<int, int> get _degreeMap {
+    final m = <int, int>{};
+    for (final e in _layoutGraphData.edges) {
+      m[e.source] = (m[e.source] ?? 0) + 1;
+      m[e.target] = (m[e.target] ?? 0) + 1;
+    }
+    return m;
   }
 
+  // ── Build ─────────────────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
-    final attacks = _attackCount();
-    final critical = _criticalCount();
+    final degreeMap = _degreeMap;
 
     return Scaffold(
-      backgroundColor: const Color(0xFF0A0E12),
-      body: Stack(
-        children: [
-          Positioned.fill(child: CustomPaint(painter: GridPainter())),
+      backgroundColor: const Color(0xFF080B10),
+      body: Stack(children: [
+        // ── Dot-grid background
+        Positioned.fill(child: CustomPaint(painter: _DotGridPainter())),
 
-          // Graph canvas
-          Positioned.fill(
-            child: GestureDetector(
-              onScaleStart: (_) {
-                setState(() => _showControls = false);
-                _clearSelection();
-              },
-              onScaleUpdate: (details) {
-                setState(() {
-                  _scale = (_scale * details.scale).clamp(0.2, 5.0);
-                  _panOffset += details.focalPointDelta;
-                });
-              },
-              onScaleEnd: (_) => setState(() => _showControls = true),
-              onDoubleTap: _autoFit,
-              onTapUp: (details) {
-                final tapPos = details.localPosition;
-                GraphNode? tappedNode;
-
-                for (final node in _layoutGraphData.nodes) {
-                  final nodePos = Offset(
-                    node.x * _scale + _panOffset.dx,
-                    node.y * _scale + _panOffset.dy,
-                  );
-                  final radius =
-                      (10 + node.anomaly * 15) / _scale.clamp(0.5, 2.0);
-
-                  if ((tapPos - nodePos).distance <= radius * 2) {
-                    tappedNode = node;
-                    break;
-                  }
+        // ── Graph canvas
+        Positioned.fill(
+          child: GestureDetector(
+            onScaleStart: (_) {
+              setState(() => _showControls = false);
+              _clearSelection();
+            },
+            onScaleUpdate: (d) => setState(() {
+              _scale = (_scale * d.scale).clamp(0.1, 8.0);
+              _panOffset += d.focalPointDelta;
+            }),
+            onScaleEnd: (_) => setState(() => _showControls = true),
+            onDoubleTap: _autoFit,
+            onTapUp: (d) {
+              final tap = d.localPosition;
+              GraphNode? hit;
+              // Check in reverse so topmost-drawn node is hit first.
+              for (final node in _layoutGraphData.nodes.reversed) {
+                final c = Offset(
+                  node.x * _scale + _panOffset.dx,
+                  node.y * _scale + _panOffset.dy,
+                );
+                final deg = degreeMap[node.id] ?? 0;
+                final r = _nodeRadius(node.anomaly, deg) * _scale;
+                if ((tap - c).distance <= r + 6) {
+                  hit = node;
+                  break;
                 }
-
-                if (tappedNode != null) {
-                  _onNodeTap(tappedNode);
-                } else {
-                  _clearSelection();
-                }
-              },
-              child: AnimatedBuilder(
-                animation: _pulseController,
-                builder: (context, child) {
-                  return CustomPaint(
-                    size: widget.size,
-                    painter: GraphPainter(
-                      nodes: _layoutGraphData.nodes,
-                      edges: _layoutGraphData.edges,
-                      panOffset: _panOffset,
-                      scale: _scale,
-                      pulseValue: _pulseController.value,
-                      selectedNode: _selectedNode,
-                      highlightedNodes: _highlightedNodes,
-                    ),
-                  );
-                },
-              ),
-            ),
-          ),
-
-          // Stats Panel
-          Positioned(
-            top: 20,
-            right: 20,
-            child: Material(
-              color: Colors.black.withOpacity(0.8),
-              borderRadius: BorderRadius.circular(16),
-              elevation: 12,
-              child: Container(
-                padding: const EdgeInsets.all(20),
-                constraints: const BoxConstraints(maxWidth: 200),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Container(
-                          width: 8,
-                          height: 8,
-                          decoration: BoxDecoration(
-                            color: Colors.cyan,
-                            shape: BoxShape.circle,
-                            boxShadow: [
-                              BoxShadow(
-                                color: Colors.cyan.withOpacity(0.5),
-                                blurRadius: 8,
-                                spreadRadius: 2,
-                              ),
-                            ],
-                          ),
-                        ),
-                        const SizedBox(width: 10),
-                        const Text(
-                          'NETWORK STATUS',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 13,
-                            fontWeight: FontWeight.bold,
-                            letterSpacing: 1.5,
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 16),
-                    const Divider(color: Colors.white24, height: 1),
-                    const SizedBox(height: 16),
-                    _StatRow('Total Nodes', '${_layoutGraphData.nodes.length}',
-                        Colors.blue),
-                    _StatRow('Connections', '${_layoutGraphData.edges.length}',
-                        Colors.blue),
-                    const SizedBox(height: 8),
-                    _StatRow('🔥 Critical', '$critical', Colors.red),
-                    _StatRow(
-                        '⚠️ Warnings', '${attacks - critical}', Colors.orange),
-                    const SizedBox(height: 8),
-                    _StatRow(
-                      'Avg Anomaly',
-                      _layoutGraphData.nodes.isEmpty
-                          ? '0%'
-                          : '${(_layoutGraphData.nodes.fold<double>(0.0, (sum, n) => sum + n.anomaly) / _layoutGraphData.nodes.length * 100).toStringAsFixed(1)}%',
-                      _getAnomalyColor(_layoutGraphData.nodes.isEmpty
-                          ? 0.0
-                          : _layoutGraphData.nodes.fold<double>(
-                                  0.0, (sum, n) => sum + n.anomaly) /
-                              _layoutGraphData.nodes.length),
-                    ),
-                  ],
+              }
+              hit != null ? _onNodeTap(hit) : _clearSelection();
+            },
+            child: AnimatedBuilder(
+              animation: _pulseController,
+              builder: (_, __) => CustomPaint(
+                size: widget.size,
+                painter: _GraphPainter(
+                  nodes: _layoutGraphData.nodes,
+                  edges: _layoutGraphData.edges,
+                  panOffset: _panOffset,
+                  scale: _scale,
+                  pulseValue: _pulseController.value,
+                  selectedNode: _selectedNode,
+                  highlightedNodes: _highlightedNodes,
+                  degreeMap: degreeMap,
                 ),
               ),
             ),
           ),
-
-          // Selected Node Info
-          if (_selectedNode != null)
-            Positioned(
-              top: 20,
-              left: 20,
-              child: Material(
-                color: Colors.black.withOpacity(0.9),
-                borderRadius: BorderRadius.circular(12),
-                elevation: 12,
-                child: Container(
-                  padding: const EdgeInsets.all(16),
-                  constraints: const BoxConstraints(maxWidth: 280),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Row(
-                        children: [
-                          Container(
-                            width: 12,
-                            height: 12,
-                            decoration: BoxDecoration(
-                              color: _getNodeColor(_selectedNode!.anomaly),
-                              shape: BoxShape.circle,
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          const Text(
-                            'NODE DETAILS',
-                            style: TextStyle(
-                              color: Colors.white70,
-                              fontSize: 11,
-                              fontWeight: FontWeight.bold,
-                              letterSpacing: 1.2,
-                            ),
-                          ),
-                          const Spacer(),
-                          GestureDetector(
-                            onTap: _clearSelection,
-                            child: const Icon(Icons.close,
-                                color: Colors.white54, size: 18),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 12),
-                      Text(
-                        'IP: ${_selectedNode!.ip}',
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 14,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      Text('Node ID: ${_selectedNode!.id}',
-                          style:
-                              TextStyle(color: Colors.grey[400], fontSize: 12)),
-                      const SizedBox(height: 8),
-                      Row(
-                        children: [
-                          Text('Anomaly Score: ',
-                              style: TextStyle(
-                                  color: Colors.grey[400], fontSize: 12)),
-                          Text(
-                            '${(_selectedNode!.anomaly * 100).toStringAsFixed(1)}%',
-                            style: TextStyle(
-                              color: _getNodeColor(_selectedNode!.anomaly),
-                              fontSize: 13,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 8),
-                      Text('Connections: ${_highlightedNodes.length - 1}',
-                          style:
-                              TextStyle(color: Colors.grey[400], fontSize: 12)),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-
-          // Controls
-          if (_showControls)
-            Positioned(
-              bottom: 20,
-              left: 20,
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  _ControlButton(
-                      icon: Icons.zoom_out_map, label: 'Fit', onTap: _autoFit),
-                  const SizedBox(width: 8),
-                  _ControlButton(
-                    icon: Icons.refresh,
-                    label: 'Reset',
-                    onTap: () {
-                      setState(() {
-                        _scale = 1.0;
-                        _panOffset = Offset.zero;
-                      });
-                      Future.delayed(
-                          const Duration(milliseconds: 100), _autoFit);
-                    },
-                  ),
-                ],
-              ),
-            ),
-
-          // Legend
-          Positioned(
-            bottom: 20,
-            right: 20,
-            child: Material(
-              color: Colors.black.withOpacity(0.7),
-              borderRadius: BorderRadius.circular(12),
-              child: Padding(
-                padding: const EdgeInsets.all(12),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    _LegendItem(Colors.green, 'Normal (< 10%)'),
-                    _LegendItem(Colors.yellow, 'Low (10-30%)'),
-                    _LegendItem(Colors.orange, 'Medium (30-60%)'),
-                    _LegendItem(Colors.red, 'Critical (> 60%)'),
-                  ],
-                ),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Color _getNodeColor(double anomaly) {
-    if (anomaly > 0.6) return Colors.red;
-    if (anomaly > 0.3) return Colors.orange;
-    if (anomaly > 0.1) return Colors.yellow;
-    return Colors.green;
-  }
-
-  Color _getAnomalyColor(double avgAnomaly) {
-    if (avgAnomaly > 0.6) return Colors.red;
-    if (avgAnomaly > 0.3) return Colors.orange;
-    if (avgAnomaly > 0.1) return Colors.yellow;
-    return Colors.green;
-  }
-}
-
-// ── Supporting widgets ────────────────────────────────────────────────────────
-
-class _StatRow extends StatelessWidget {
-  final String label;
-  final String value;
-  final Color color;
-
-  const _StatRow(this.label, this.value, this.color);
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      child: Row(
-        children: [
-          Expanded(
-              flex: 3,
-              child: Text(label,
-                  style: TextStyle(color: Colors.grey[400], fontSize: 12))),
-          Expanded(
-            flex: 2,
-            child: Text(value,
-                style: TextStyle(
-                    color: color, fontSize: 14, fontWeight: FontWeight.bold),
-                textAlign: TextAlign.right),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _LegendItem extends StatelessWidget {
-  final Color color;
-  final String label;
-
-  const _LegendItem(this.color, this.label);
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 3),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-              width: 10,
-              height: 10,
-              decoration: BoxDecoration(color: color, shape: BoxShape.circle)),
-          const SizedBox(width: 8),
-          Text(label,
-              style: const TextStyle(color: Colors.white70, fontSize: 11)),
-        ],
-      ),
-    );
-  }
-}
-
-class _ControlButton extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final VoidCallback onTap;
-
-  const _ControlButton(
-      {required this.icon, required this.label, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-        decoration: BoxDecoration(
-          color: Colors.white.withOpacity(0.1),
-          borderRadius: BorderRadius.circular(18),
-          border: Border.all(color: Colors.white.withOpacity(0.25)),
         ),
-        child: Row(
+
+        // ── Stats panel (top-right)
+        Positioned(top: 16, right: 16, child: _buildStatsPanel()),
+
+        // ── Node detail panel (top-left, when selected)
+        if (_selectedNode != null)
+          Positioned(
+              top: 16,
+              left: 16,
+              child: _buildDetailPanel(_selectedNode!, degreeMap)),
+
+        // ── Toolbar (bottom-left)
+        if (_showControls)
+          Positioned(bottom: 20, left: 20, child: _buildToolbar()),
+
+        // ── Legend (bottom-right)
+        Positioned(bottom: 20, right: 20, child: _buildLegend()),
+      ]),
+    );
+  }
+
+  // ── Panel builders ────────────────────────────────────────────────────────
+
+  Widget _buildStatsPanel() {
+    return _Panel(
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          _PulseDot(color: Colors.cyanAccent),
+          const SizedBox(width: 8),
+          const Text('NETWORK STATUS',
+              style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 12,
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: 1.6)),
+        ]),
+        const SizedBox(height: 12),
+        const Divider(color: Colors.white12, height: 1),
+        const SizedBox(height: 12),
+        _StatRow2(
+            'Visible Nodes',
+            '${_layoutGraphData.nodes.length} / ${GraphViewWidget.kMaxNodes}',
+            Colors.cyanAccent),
+        _StatRow2('Connections', '${_layoutGraphData.edges.length}',
+            Colors.blueAccent),
+        const SizedBox(height: 6),
+        _StatRow2('🔥 Critical', '$_criticalCount', Colors.redAccent),
+        _StatRow2('⚠️ Warnings', '$_warningCount', Colors.orange),
+        const SizedBox(height: 6),
+        _StatRow2('Avg Anomaly', '${(_avgAnomaly * 100).toStringAsFixed(1)}%',
+            _anomalyColor(_avgAnomaly)),
+      ]),
+    );
+  }
+
+  Widget _buildDetailPanel(GraphNode node, Map<int, int> degreeMap) {
+    final conns = degreeMap[node.id] ?? 0;
+    final severity = _severityLabel(node.anomaly);
+    final sColor = _anomalyColor(node.anomaly);
+
+    return _Panel(
+      minWidth: 260,
+      child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(icon, color: Colors.white, size: 16),
-            const SizedBox(width: 6),
-            Text(label,
-                style: const TextStyle(
-                    color: Colors.white70,
-                    fontSize: 11,
-                    fontWeight: FontWeight.w500)),
-          ],
-        ),
-      ),
+            // Header
+            Row(children: [
+              Container(
+                  width: 10,
+                  height: 10,
+                  decoration:
+                      BoxDecoration(color: sColor, shape: BoxShape.circle)),
+              const SizedBox(width: 8),
+              const Text('NODE DETAILS',
+                  style: TextStyle(
+                      color: Colors.white70,
+                      fontSize: 11,
+                      fontWeight: FontWeight.bold,
+                      letterSpacing: 1.3)),
+              const Spacer(),
+              GestureDetector(
+                  onTap: _clearSelection,
+                  child:
+                      const Icon(Icons.close, color: Colors.white38, size: 16)),
+            ]),
+            const SizedBox(height: 10),
+            const Divider(color: Colors.white12, height: 1),
+            const SizedBox(height: 10),
+            // Fields
+            _DetailField('IP Address', node.ip,
+                valueStyle: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    fontFamily: 'monospace')),
+            _DetailField('Node ID', '#${node.id}',
+                valueStyle:
+                    const TextStyle(color: Colors.cyanAccent, fontSize: 12)),
+            _DetailField(
+              'Anomaly Score',
+              '${(node.anomaly * 100).toStringAsFixed(2)}%',
+              valueStyle: TextStyle(
+                  color: sColor, fontSize: 13, fontWeight: FontWeight.bold),
+            ),
+            _DetailField('Connections', '$conns peers',
+                valueStyle:
+                    const TextStyle(color: Colors.white70, fontSize: 12)),
+            const SizedBox(height: 8),
+            // Severity badge
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+              decoration: BoxDecoration(
+                color: sColor.withOpacity(0.15),
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(color: sColor.withOpacity(0.5)),
+              ),
+              child: Text(severity,
+                  style: TextStyle(
+                      color: sColor,
+                      fontSize: 11,
+                      fontWeight: FontWeight.bold,
+                      letterSpacing: 1.2)),
+            ),
+          ]),
     );
   }
-}
 
-// ── Painters ──────────────────────────────────────────────────────────────────
-
-class GridPainter extends CustomPainter {
-  @override
-  void paint(Canvas canvas, Size size) {
-    final paint = Paint()
-      ..color = Colors.white.withOpacity(0.03)
-      ..strokeWidth = 1;
-
-    const spacing = 50.0;
-    for (double x = 0; x < size.width; x += spacing) {
-      canvas.drawLine(Offset(x, 0), Offset(x, size.height), paint);
-    }
-    for (double y = 0; y < size.height; y += spacing) {
-      canvas.drawLine(Offset(0, y), Offset(size.width, y), paint);
-    }
+  Widget _buildToolbar() {
+    return Row(mainAxisSize: MainAxisSize.min, children: [
+      _ToolBtn(Icons.add, 'Zoom In', () => _zoomBy(1.3)),
+      const SizedBox(width: 6),
+      _ToolBtn(Icons.remove, 'Zoom Out', () => _zoomBy(1 / 1.3)),
+      const SizedBox(width: 6),
+      _ToolBtn(Icons.fit_screen, 'Fit', _autoFit),
+      const SizedBox(width: 6),
+      _ToolBtn(Icons.refresh, 'Reset', () {
+        setState(() {
+          _scale = 1.0;
+          _panOffset = Offset.zero;
+        });
+        Future.delayed(const Duration(milliseconds: 80), _autoFit);
+      }),
+    ]);
   }
 
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+  Widget _buildLegend() {
+    return _Panel(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: const [
+            _LegendRow(Colors.green, 'Normal  < 10%'),
+            _LegendRow(Colors.yellow, 'Low      10–30%'),
+            _LegendRow(Colors.orange, 'Medium  30–60%'),
+            _LegendRow(Colors.redAccent, 'Critical  > 60%'),
+          ]),
+    );
+  }
+
+  // ── Helpers ───────────────────────────────────────────────────────────────
+  static double _nodeRadius(double anomaly, int degree) {
+    // Base size grows slightly with connection count (hub nodes are bigger).
+    final degBonus = math.log(degree + 1) * 1.5;
+    return 5.0 + anomaly * 10.0 + degBonus;
+  }
+
+  static Color _anomalyColor(double a) {
+    if (a > 0.6) return Colors.redAccent;
+    if (a > 0.3) return Colors.orange;
+    if (a > 0.1) return Colors.yellow;
+    return Colors.greenAccent;
+  }
+
+  static String _severityLabel(double a) {
+    if (a > 0.6) return 'CRITICAL';
+    if (a > 0.3) return 'MEDIUM';
+    if (a > 0.1) return 'LOW';
+    return 'NORMAL';
+  }
 }
 
-class GraphPainter extends CustomPainter {
+// ═══════════════════════════════════════════════════════════════════════════
+// Graph painter
+// ═══════════════════════════════════════════════════════════════════════════
+
+class _GraphPainter extends CustomPainter {
   final List<GraphNode> nodes;
   final List<GraphEdge> edges;
   final Offset panOffset;
@@ -617,16 +477,21 @@ class GraphPainter extends CustomPainter {
   final double pulseValue;
   final GraphNode? selectedNode;
   final Set<int> highlightedNodes;
+  final Map<int, int> degreeMap;
 
-  GraphPainter({
+  _GraphPainter({
     required this.nodes,
     required this.edges,
     required this.panOffset,
     required this.scale,
     required this.pulseValue,
-    this.selectedNode,
     required this.highlightedNodes,
+    required this.degreeMap,
+    this.selectedNode,
   });
+
+  Offset _toScreen(double x, double y) =>
+      Offset(x * scale + panOffset.dx, y * scale + panOffset.dy);
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -635,176 +500,407 @@ class GraphPainter extends CustomPainter {
     final nodeMap = <int, GraphNode>{for (final n in nodes) n.id: n};
     final hasSelection = highlightedNodes.isNotEmpty;
 
-    // ── Edges ────────────────────────────────────────────────────────────────
-    // With 1000+ edges drawing every line creates a solid blob.
-    // Strategy: always draw highlighted edges; for the rest, only draw the
-    // top-weight edges up to a cap so the graph stays readable.
-    const maxUnselectedEdges = 120;
+    // ── Edges ──────────────────────────────────────────────────────────────
+    const maxEdges = 150;
+    int drawnEdges = 0;
 
-    // Sort edges: highlighted first, then by weight descending
-    final sortedEdges = List<GraphEdge>.from(edges)
+    // Sort: highlighted first, then by weight desc.
+    final sorted = List<GraphEdge>.from(edges)
       ..sort((a, b) {
-        final aHl = highlightedNodes.contains(a.source) &&
+        final aH = highlightedNodes.contains(a.source) &&
             highlightedNodes.contains(a.target);
-        final bHl = highlightedNodes.contains(b.source) &&
+        final bH = highlightedNodes.contains(b.source) &&
             highlightedNodes.contains(b.target);
-        if (aHl != bHl) return aHl ? -1 : 1;
+        if (aH != bH) return aH ? -1 : 1;
         return b.weight.compareTo(a.weight);
       });
 
-    int unselectedCount = 0;
-    final strokeBase = 1.2 / scale.clamp(0.4, 2.0);
+    for (final edge in sorted) {
+      final n1 = nodeMap[edge.source];
+      final n2 = nodeMap[edge.target];
+      if (n1 == null || n2 == null) continue;
 
-    for (final edge in sortedEdges) {
-      final node1 = nodeMap[edge.source];
-      final node2 = nodeMap[edge.target];
-      if (node1 == null || node2 == null) continue;
-
-      final isHighlighted = highlightedNodes.contains(edge.source) &&
+      final isHL = highlightedNodes.contains(edge.source) &&
           highlightedNodes.contains(edge.target);
 
-      // Skip low-priority edges once we hit the cap (keeps graph readable)
-      if (!isHighlighted && hasSelection) continue;
-      if (!isHighlighted && unselectedCount >= maxUnselectedEdges) continue;
-      if (!isHighlighted) unselectedCount++;
+      if (hasSelection && !isHL) continue;
+      if (!hasSelection && drawnEdges >= maxEdges) continue;
+      if (!hasSelection) drawnEdges++;
 
-      final p1 = Offset(
-          node1.x * scale + panOffset.dx, node1.y * scale + panOffset.dy);
-      final p2 = Offset(
-          node2.x * scale + panOffset.dx, node2.y * scale + panOffset.dy);
+      final p1 = _toScreen(n1.x, n1.y);
+      final p2 = _toScreen(n2.x, n2.y);
+      if (!p1.dx.isFinite || !p2.dx.isFinite) continue;
 
-      if (!p1.dx.isFinite ||
-          !p1.dy.isFinite ||
-          !p2.dx.isFinite ||
-          !p2.dy.isFinite) continue;
+      // Curved edges: control point offset perpendicular to mid-point.
+      final mid = (p1 + p2) / 2;
+      final dx = p2.dx - p1.dx;
+      final dy = p2.dy - p1.dy;
+      final len = math.sqrt(dx * dx + dy * dy);
+      final curve = len * 0.18;
+      final ctrl = Offset(mid.dx - dy / len * curve, mid.dy + dx / len * curve);
 
-      Color edgeColor;
-      double strokeWidth;
-      if (isHighlighted) {
-        edgeColor = Colors.cyan.withOpacity(0.85);
-        strokeWidth = strokeBase * 1.8;
-      } else {
-        // Colour by weight: heavier = more cyan, lighter = dimmer grey
-        final t = (edge.weight / 5.0).clamp(0.0, 1.0);
-        edgeColor = Color.lerp(
-          Colors.white.withOpacity(0.12),
-          Colors.cyan.withOpacity(0.45),
-          t,
-        )!;
-        strokeWidth = strokeBase * (0.8 + t * 0.6);
-      }
+      final path = Path()
+        ..moveTo(p1.dx, p1.dy)
+        ..quadraticBezierTo(ctrl.dx, ctrl.dy, p2.dx, p2.dy);
 
-      canvas.drawLine(
-          p1,
-          p2,
+      final t = (edge.weight / 5.0).clamp(0.0, 1.0);
+      final color = isHL
+          ? Colors.cyanAccent.withOpacity(0.9)
+          : Color.lerp(Colors.white.withOpacity(0.08),
+              Colors.cyanAccent.withOpacity(0.4), t)!;
+
+      canvas.drawPath(
+          path,
           Paint()
-            ..color = edgeColor
-            ..strokeWidth = strokeWidth
-            ..style = PaintingStyle.stroke);
+            ..color = color
+            ..strokeWidth = isHL ? 1.8 * scale.clamp(0.5, 2) : 1.0
+            ..style = PaintingStyle.stroke
+            ..strokeCap = StrokeCap.round);
+
+      // Arrowhead on highlighted edges to show directionality.
+      if (isHL) {
+        _drawArrow(canvas, ctrl, p2, color);
+      }
     }
 
-    // ── Nodes ────────────────────────────────────────────────────────────────
+    // ── Nodes ──────────────────────────────────────────────────────────────
     for (final node in nodes) {
-      final center =
-          Offset(node.x * scale + panOffset.dx, node.y * scale + panOffset.dy);
-      if (!center.dx.isFinite || !center.dy.isFinite) continue;
+      final c = _toScreen(node.x, node.y);
+      if (!c.dx.isFinite || !c.dy.isFinite) continue;
 
-      final isHighlighted = highlightedNodes.contains(node.id);
-      final isSelected = selectedNode?.id == node.id;
-      final dimmed = hasSelection && !isHighlighted;
-      final opacity = dimmed ? 0.25 : 1.0;
+      final isHL = highlightedNodes.contains(node.id);
+      final isSel = selectedNode?.id == node.id;
+      final dimmed = hasSelection && !isHL;
+      final opacity = dimmed ? 0.2 : 1.0;
 
-      // Keep node size modest — anomaly drives colour, not huge radius
-      final radius = (6.0 + node.anomaly * 8.0) / scale.clamp(0.4, 2.0);
-      final nodeColor = _getNodeColor(node.anomaly);
+      final deg = degreeMap[node.id] ?? 0;
+      // FIX: radius is in world-space, multiply by scale for screen size.
+      // Previously divided by scale which made nodes shrink on zoom-in.
+      final baseR = _GraphViewWidgetState._nodeRadius(node.anomaly, deg);
+      final r = baseR * scale.clamp(0.3, 4.0);
 
-      // Subtle pulse only for critical nodes — no giant glow
-      final pulseMultiplier =
-          (node.anomaly > 0.6 && !dimmed) ? 1.0 + (pulseValue * 0.15) : 1.0;
+      final color = _GraphViewWidgetState._anomalyColor(node.anomaly);
+      final pulse =
+          (node.anomaly > 0.6 && !dimmed) ? 1.0 + pulseValue * 0.18 : 1.0;
 
-      // Thin outer ring on anomalous nodes (replaces the heavy glow)
-      if (node.anomaly > 0.3 && !dimmed) {
+      // Glow ring (critical only)
+      if (node.anomaly > 0.6 && !dimmed) {
         canvas.drawCircle(
-          center,
-          radius * 1.45 * pulseMultiplier,
-          Paint()
-            ..color = nodeColor.withOpacity(node.anomaly > 0.6 ? 0.55 : 0.35)
-            ..style = PaintingStyle.stroke
-            ..strokeWidth = 1.5 / scale.clamp(0.4, 2.0),
-        );
+            c,
+            r * 2.2 * pulse,
+            Paint()
+              ..color = Colors.red.withOpacity(0.12 * pulseValue)
+              ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 12));
       }
 
-      // Main filled circle
-      canvas.drawCircle(
-        center,
-        radius * pulseMultiplier,
-        Paint()
-          ..color = nodeColor.withOpacity(opacity)
-          ..style = PaintingStyle.fill,
-      );
+      // Outer anomaly ring
+      if (node.anomaly > 0.1 && !dimmed) {
+        canvas.drawCircle(
+            c,
+            r * 1.5 * pulse,
+            Paint()
+              ..color = color.withOpacity(node.anomaly > 0.6 ? 0.45 : 0.25)
+              ..style = PaintingStyle.stroke
+              ..strokeWidth = 1.2);
+      }
 
-      // Dark inner dot so nodes look solid, not flat
+      // Main fill with radial gradient
+      final grad = RadialGradient(colors: [
+        color.withOpacity(opacity),
+        color.withOpacity(opacity * 0.6),
+      ]);
       canvas.drawCircle(
-        center,
-        radius * 0.35 * pulseMultiplier,
-        Paint()
-          ..color = Colors.black.withOpacity(0.35 * opacity)
-          ..style = PaintingStyle.fill,
-      );
+          c,
+          r * pulse,
+          Paint()
+            ..shader = grad
+                .createShader(Rect.fromCircle(center: c, radius: r * pulse)));
+
+      // Inner specular highlight
+      canvas.drawCircle(Offset(c.dx - r * 0.25, c.dy - r * 0.25), r * 0.3,
+          Paint()..color = Colors.white.withOpacity(0.25 * opacity));
 
       // Selection ring
-      if (isSelected) {
+      if (isSel) {
         canvas.drawCircle(
-          center,
-          radius * 1.7,
-          Paint()
-            ..color = Colors.white
-            ..style = PaintingStyle.stroke
-            ..strokeWidth = 2.0 / scale.clamp(0.4, 2.0),
-        );
+            c,
+            r * 1.8,
+            Paint()
+              ..color = Colors.white.withOpacity(0.9)
+              ..style = PaintingStyle.stroke
+              ..strokeWidth = 1.5);
+        // Second outer ring for emphasis
+        canvas.drawCircle(
+            c,
+            r * 2.1,
+            Paint()
+              ..color = Colors.cyanAccent.withOpacity(0.4)
+              ..style = PaintingStyle.stroke
+              ..strokeWidth = 0.8);
       }
 
-      // IP label — show whenever zoomed in enough or node is selected
-      if (scale > 0.5 || isSelected) {
-        final displayText =
-            node.ip.length > 15 ? '${node.ip.substring(0, 13)}...' : node.ip;
+      // Connection-count badge (only when not dimmed and has edges)
+      if (deg > 0 && !dimmed && scale > 0.5) {
+        final badgePos = Offset(c.dx + r * 0.75, c.dy - r * 0.75);
+        final badgeR = (6.0 * scale).clamp(4.0, 10.0);
+        canvas.drawCircle(
+            badgePos, badgeR, Paint()..color = const Color(0xFF0A0E18));
+        canvas.drawCircle(
+            badgePos,
+            badgeR,
+            Paint()
+              ..color = Colors.cyanAccent.withOpacity(0.7)
+              ..style = PaintingStyle.stroke
+              ..strokeWidth = 0.8);
+        final badge = TextPainter(
+          text: TextSpan(
+            text: deg > 99 ? '99+' : '$deg',
+            style: TextStyle(
+                color: Colors.cyanAccent,
+                fontSize: (badgeR * 1.1).clamp(6.0, 10.0),
+                fontWeight: FontWeight.bold),
+          ),
+          textDirection: TextDirection.ltr,
+        )..layout();
+        badge.paint(
+            canvas, badgePos - Offset(badge.width / 2, badge.height / 2));
+      }
+
+      // IP label with background pill
+      if (scale > 0.45 || isSel) {
+        final text =
+            node.ip.length > 15 ? '${node.ip.substring(0, 13)}…' : node.ip;
+        final fs = ((isSel ? 10.5 : 9.0) * scale.clamp(0.5, 1.8));
         final tp = TextPainter(
           text: TextSpan(
-            text: displayText,
-            style: TextStyle(
-              color: Colors.white.withOpacity(dimmed ? 0.2 : 0.88),
-              fontSize: (isSelected ? 11.0 : 9.0) / scale.clamp(0.4, 2.0),
-              fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
-              shadows: [
-                Shadow(blurRadius: 4, color: Colors.black.withOpacity(0.9))
-              ],
-            ),
-          ),
+              text: text,
+              style: TextStyle(
+                  color: Colors.white.withOpacity(dimmed ? 0.15 : 0.92),
+                  fontSize: fs,
+                  fontWeight: isSel ? FontWeight.bold : FontWeight.w500,
+                  letterSpacing: 0.3,
+                  shadows: const [Shadow(blurRadius: 4, color: Colors.black)])),
           textAlign: TextAlign.center,
           textDirection: TextDirection.ltr,
-        )..layout(minWidth: 0, maxWidth: 140);
+        )..layout(minWidth: 0, maxWidth: 160);
 
-        tp.paint(
-            canvas,
-            Offset(center.dx - tp.width / 2,
-                center.dy + radius * pulseMultiplier + 4));
+        final labelY = c.dy + r * pulse + 5;
+        final lx = c.dx - tp.width / 2;
+
+        // Semi-transparent pill behind label
+        if (!dimmed) {
+          final pill = RRect.fromRectAndRadius(
+              Rect.fromLTWH(lx - 4, labelY - 1, tp.width + 8, tp.height + 2),
+              const Radius.circular(4));
+          canvas.drawRRect(pill, Paint()..color = const Color(0xCC080B10));
+        }
+        tp.paint(canvas, Offset(lx, labelY));
       }
     }
   }
 
-  Color _getNodeColor(double anomaly) {
-    if (anomaly > 0.6) return Colors.red;
-    if (anomaly > 0.3) return Colors.orange;
-    if (anomaly > 0.1) return Colors.yellow;
-    return Colors.green;
+  void _drawArrow(Canvas canvas, Offset from, Offset to, Color color) {
+    final dx = to.dx - from.dx;
+    final dy = to.dy - from.dy;
+    final len = math.sqrt(dx * dx + dy * dy);
+    if (len < 1) return;
+    final ux = dx / len, uy = dy / len;
+    final arrowLen = (8 * scale).clamp(4.0, 14.0);
+    const spread = 0.4;
+    final p1 = Offset(to.dx - ux * arrowLen - uy * arrowLen * spread,
+        to.dy - uy * arrowLen + ux * arrowLen * spread);
+    final p2 = Offset(to.dx - ux * arrowLen + uy * arrowLen * spread,
+        to.dy - uy * arrowLen - ux * arrowLen * spread);
+    canvas.drawPath(
+        Path()
+          ..moveTo(to.dx, to.dy)
+          ..lineTo(p1.dx, p1.dy)
+          ..lineTo(p2.dx, p2.dy)
+          ..close(),
+        Paint()..color = color);
   }
 
   @override
-  bool shouldRepaint(covariant GraphPainter oldDelegate) {
-    return oldDelegate.pulseValue != pulseValue ||
-        oldDelegate.selectedNode != selectedNode ||
-        oldDelegate.highlightedNodes != highlightedNodes ||
-        oldDelegate.panOffset != panOffset ||
-        oldDelegate.scale != scale;
+  bool shouldRepaint(covariant _GraphPainter old) =>
+      old.pulseValue != pulseValue ||
+      old.selectedNode != selectedNode ||
+      old.highlightedNodes != highlightedNodes ||
+      old.panOffset != panOffset ||
+      old.scale != scale ||
+      old.nodes.length != nodes.length;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Background dot grid
+// ═══════════════════════════════════════════════════════════════════════════
+
+class _DotGridPainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final p = Paint()..color = Colors.white.withOpacity(0.045);
+    const step = 40.0;
+    for (double x = 0; x < size.width; x += step) {
+      for (double y = 0; y < size.height; y += step) {
+        canvas.drawCircle(Offset(x, y), 1.0, p);
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter _) => false;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Reusable UI components
+// ═══════════════════════════════════════════════════════════════════════════
+
+class _Panel extends StatelessWidget {
+  final Widget child;
+  final double? minWidth;
+  final EdgeInsetsGeometry padding;
+
+  const _Panel({
+    required this.child,
+    this.minWidth,
+    this.padding = const EdgeInsets.all(18),
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      constraints: BoxConstraints(maxWidth: 260, minWidth: minWidth ?? 0),
+      padding: padding,
+      decoration: BoxDecoration(
+        color: const Color(0xEE0D1117),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: Colors.white.withOpacity(0.08)),
+        boxShadow: [
+          BoxShadow(
+              color: Colors.black.withOpacity(0.5),
+              blurRadius: 20,
+              offset: const Offset(0, 4))
+        ],
+      ),
+      child: child,
+    );
+  }
+}
+
+class _PulseDot extends StatelessWidget {
+  final Color color;
+  const _PulseDot({required this.color});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 8,
+      height: 8,
+      decoration: BoxDecoration(
+        color: color,
+        shape: BoxShape.circle,
+        boxShadow: [
+          BoxShadow(
+              color: color.withOpacity(0.6), blurRadius: 6, spreadRadius: 1)
+        ],
+      ),
+    );
+  }
+}
+
+class _StatRow2 extends StatelessWidget {
+  final String label;
+  final String value;
+  final Color color;
+  const _StatRow2(this.label, this.value, this.color);
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 3.5),
+      child: Row(children: [
+        Expanded(
+            child: Text(label,
+                style: TextStyle(color: Colors.grey[500], fontSize: 12))),
+        Text(value,
+            style: TextStyle(
+                color: color, fontSize: 13, fontWeight: FontWeight.w700)),
+      ]),
+    );
+  }
+}
+
+class _DetailField extends StatelessWidget {
+  final String label;
+  final String value;
+  final TextStyle? valueStyle;
+  const _DetailField(this.label, this.value, {this.valueStyle});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        SizedBox(
+            width: 108,
+            child: Text(label,
+                style: TextStyle(color: Colors.grey[500], fontSize: 11))),
+        Expanded(
+            child: Text(value,
+                style: valueStyle ??
+                    const TextStyle(color: Colors.white70, fontSize: 12))),
+      ]),
+    );
+  }
+}
+
+class _LegendRow extends StatelessWidget {
+  final Color color;
+  final String label;
+  const _LegendRow(this.color, this.label) : super();
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 3),
+      child: Row(mainAxisSize: MainAxisSize.min, children: [
+        Container(
+            width: 9,
+            height: 9,
+            decoration: BoxDecoration(color: color, shape: BoxShape.circle)),
+        const SizedBox(width: 8),
+        Text(label, style: TextStyle(color: Colors.grey[400], fontSize: 11)),
+      ]),
+    );
+  }
+}
+
+class _ToolBtn extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+  const _ToolBtn(this.icon, this.label, this.onTap);
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: const Color(0xCC0D1117),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: Colors.white.withOpacity(0.12)),
+        ),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          Icon(icon, color: Colors.white70, size: 15),
+          const SizedBox(width: 5),
+          Text(label,
+              style: const TextStyle(
+                  color: Colors.white54,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w500)),
+        ]),
+      ),
+    );
   }
 }

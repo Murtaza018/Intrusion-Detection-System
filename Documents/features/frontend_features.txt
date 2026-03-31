@@ -8,7 +8,7 @@ Design a Mobile Monitoring & Alert App for IDS systems, integrating 2–3 core a
 
 3-Feedback Submission – Users can mark alerts as false positives/negatives, feeding back to retraining (Topic 3).(done)
 
-4-Live Network Graph View – Interactive visualization of network graph topology and anomaly hot-spots (Topic 2).
+4-Live Network Graph View – Interactive visualization of network graph topology and anomaly hot-spots (Topic 2).(Done)
 
 5-Adaptive Sensitivity Control – Use insights from explanations to adjust detection thresholds dynamically (Topic 3).
 

@@ -4,6 +4,7 @@ import './screens/dashboard_screen.dart';
 import './screens/graph_screen.dart';
 import './screens/adaptation_screen.dart';
 import './providers/ids_provider.dart';
+import './screens/alert_history_screen.dart';
 
 void main() {
   runApp(MyApp());
@@ -70,6 +71,7 @@ class _BottomNavRootState extends State<_BottomNavRoot> {
     DashboardScreen(),
     GraphScreen(),
     AdaptationScreen(),
+    AlertHistoryScreen(),
   ];
 
   @override
@@ -99,6 +101,11 @@ class _BottomNavRootState extends State<_BottomNavRoot> {
           BottomNavigationBarItem(
             icon: Icon(Icons.model_training),
             label: "Adapt",
+          ),
+          BottomNavigationBarItem(
+            // <-- new item
+            icon: Icon(Icons.analytics),
+            label: "History",
           ),
         ],
       ),

@@ -145,6 +145,45 @@ class IdsApiClient {
     return null;
   }
 
+  // providers/ids_api_client.dart — add this method
+
+// ---------------------------------------------------------------------------
+// History analytics (trend charts)
+// ---------------------------------------------------------------------------
+
+  Future<Map<String, dynamic>?> fetchHistory({
+    String window = '24h',
+    int limit = 10000,
+  }) async {
+    try {
+      final uri = Uri.parse('${IdsConfig.baseUrl}/api/history').replace(
+        queryParameters: {
+          'window': window,
+          'limit': limit.toString(),
+        },
+      );
+
+      final res = await http.get(
+        uri,
+        headers: IdsConfig.headers,
+      );
+
+      debugPrint("=== FETCH_HISTORY ===");
+      debugPrint("Status: ${res.statusCode}");
+      debugPrint("Body: ${res.body}");
+
+      final result = await _secureParseInIsolate(res.bodyBytes);
+      debugPrint("Secure parse result: $result");
+
+      if (res.statusCode == 200 && result['success'] == true) {
+        return result['payload'] as Map<String, dynamic>;
+      }
+    } catch (e, s) {
+      debugPrint("History fetch error: $e\n$s");
+    }
+    return null;
+  }
+
   // ---------------------------------------------------------------------------
   // Isolate helpers — all ECC math runs off the UI thread
   // ---------------------------------------------------------------------------

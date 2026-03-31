@@ -37,7 +37,7 @@ class IdsProvider with ChangeNotifier {
   // ---------------------------------------------------------------------------
   // State passthrough getters
   // ---------------------------------------------------------------------------
-
+  IdsApiClient get apiClient => _api;
   bool get isRunning => _state.isRunning;
   int get totalPackets => _state.totalPackets;
   int get normalCount => _state.normalCount;

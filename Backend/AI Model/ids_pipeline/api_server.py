@@ -18,7 +18,24 @@ from retrain_manager import RetrainManager, JobStatus
 from gan_retrainer import GanRetrainer, JitterRetrainer
 from config import API_KEY
 from detector import Detector
+from datetime import datetime
 
+
+def _ts_to_epoch(obj):
+    """
+    Convert a dict with:
+      "timestamp" (ISO‑string) to int epoch.
+    """
+    utc = datetime.now().astimezone()  # fallback to now
+    ts = obj.get("timestamp")
+
+    if isinstance(ts, str):
+        try:
+            dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+            return int(dt.timestamp())
+        except Exception as e:
+            print(f"ts parse error: {e}")
+    return int(utc.timestamp())
 
 
 def calculate_group_consistency(feature_list):
@@ -360,6 +377,87 @@ class APIServer:
                     {"error": str(e)},
                     500
                 )
+        # inside class APIServer
+# ── 6. Historical Alert Analytics ──────────────────────────────────
+
+        @self.app.route("/api/history", methods=['GET'])
+        @self._require_api_key
+        def get_alert_history():
+            try:
+                window = request.args.get('window', '24h', type=str)
+                limit  = request.args.get('limit',  10_000, type=int)
+
+                all_packets = self.packet_storage.get_packets(limit=limit, status_filter=None)
+
+                BUCKET = 3600  # 1‑hour bucket
+                by_time = {}
+                by_type = {}
+                total_anomaly = 0.0
+                count_anomaly = 0
+
+                for p in all_packets:
+                    status = p.get("status", "unknown")
+                    expl   = p.get("explanation", {}) or {}
+
+                    mae = float(expl.get("mae_anomaly", 0.0))
+                    if 0.0 < mae < 1.0:
+                        total_anomaly += mae
+                        count_anomaly += 1
+
+                    # 1. your three labels: normal, attack, zero_day
+                    if status == "normal":
+                        label = "normal"
+                    elif status == "known_attack":
+                        label = "attack"
+                    elif status == "zero_day":
+                        label = "zero_day"
+                    else:
+                        label = "unknown"
+
+                    by_type[label] = by_type.get(label, 0) + 1
+
+                    # 2. use _ts_to_epoch with your ISO timestamp field
+                    ts = _ts_to_epoch(p)  # <-- from above
+                    if ts == 0:
+                        continue
+                    bucket = ts - (ts % BUCKET)
+
+                    by_time[bucket] = by_time.get(bucket, 0) + 1
+
+                # 3. time series
+                sorted_time = sorted(by_time.items())
+                alerts_volume = [
+                    {"timestamp": k, "count": v}
+                    for k, v in sorted_time
+                ]
+
+                by_type_items = [
+                    {"label": k, "count": v}
+                    for k, v in by_type.items()
+                ]
+
+                avg_anomaly = (total_anomaly / count_anomaly) if count_anomaly else 0.0
+
+                payload = {
+                    "window": window,
+                    "alerts_volume": alerts_volume,
+                    "by_type": by_type_items,
+                    "performance": {
+                        "avg_anomaly": round(avg_anomaly, 4),
+                        "total_alerts": len(by_time),
+                        "total_packets": len(all_packets),
+                        "detection_rate": round(
+                            sum(by_type.get(l, 0) for l in ["attack", "zero_day"]) / max(len(all_packets), 1),
+                            4
+                        ),
+                        "fp_estimate": 0.0,
+                    }
+                }
+                return self._secure_response(payload)
+
+            except Exception as e:
+                traceback.print_exc()
+                return self._secure_response({"error": str(e)}, 500)   
 
 
     def _get_require_api_key_decorator(self):

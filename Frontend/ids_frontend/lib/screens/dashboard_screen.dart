@@ -1,3 +1,4 @@
+// lib/screens/dashboard_screen.dart
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/ids_provider.dart';
@@ -8,8 +9,6 @@ import 'adaptation_screen.dart';
 class DashboardScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
-    // listen: false prevents the entire screen from rebuilding on every change.
-    // We use Selector and Consumer for the parts that actually need to update.
     final provider = Provider.of<IdsProvider>(context, listen: false);
 
     return Scaffold(
@@ -21,9 +20,7 @@ class DashboardScreen extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 _buildTopBar(provider),
-                _buildCompactSearchFilterBar(provider),
-
-                // Optimized Sensory Layer - Only rebuilds if the engine starts/stops
+                _buildSearchFilterBar(context, provider),
                 Selector<IdsProvider, bool>(
                   selector: (_, p) => p.isRunning,
                   builder: (context, isRunning, child) {
@@ -36,9 +33,7 @@ class DashboardScreen extends StatelessWidget {
                         : const SizedBox.shrink();
                   },
                 ),
-
                 _buildStreamHeader(),
-
                 Expanded(child: PacketList()),
               ],
             ),
@@ -53,7 +48,8 @@ class DashboardScreen extends StatelessWidget {
     );
   }
 
-  // Extracted Stream Header to isolate the "Filtered Count" updates
+  // ── Stream header ─────────────────────────────────────────────────────────
+
   Widget _buildStreamHeader() {
     return Consumer<IdsProvider>(
       builder: (context, provider, _) => Padding(
@@ -83,52 +79,196 @@ class DashboardScreen extends StatelessWidget {
     );
   }
 
-  Widget _buildCompactSearchFilterBar(IdsProvider provider) {
+  // ── Search + Filter bar ───────────────────────────────────────────────────
+
+  Widget _buildSearchFilterBar(BuildContext context, IdsProvider provider) {
     return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 24, vertical: 4),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
+      margin: const EdgeInsets.fromLTRB(24, 6, 24, 4),
       decoration: BoxDecoration(
-        color: const Color(0xFF15191C),
-        borderRadius: BorderRadius.circular(4),
-        border: Border.all(color: Colors.white.withOpacity(0.03)),
+        color: const Color(0xFF0D1117),
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: Colors.white.withOpacity(0.06)),
       ),
-      child: Row(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          Expanded(
-            flex: 3,
-            child: TextField(
-              onChanged: (val) => provider.updateSearchQuery(val),
-              textAlignVertical: TextAlignVertical.center,
-              style: const TextStyle(
-                  fontSize: 11, color: Colors.white, fontFamily: 'monospace'),
-              decoration: const InputDecoration(
-                isCollapsed: true,
-                hintText: "FILTER BY IP, PORT, OR PROTOCOL...",
-                hintStyle: TextStyle(color: Colors.white10, fontSize: 11),
-                prefixIcon: Icon(Icons.search, size: 14, color: Colors.white24),
-                border: InputBorder.none,
-                contentPadding: EdgeInsets.symmetric(vertical: 12),
+          // ── Top row: search field ───────────────────────────────────────
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 2, 8, 2),
+            child: Row(children: [
+              const Icon(Icons.search, size: 14, color: Colors.white24),
+              const SizedBox(width: 8),
+              Expanded(
+                child: TextField(
+                  onChanged: (val) => provider.updateSearchQuery(val),
+                  textAlignVertical: TextAlignVertical.center,
+                  style: const TextStyle(
+                      fontSize: 11,
+                      color: Colors.white,
+                      fontFamily: 'monospace'),
+                  decoration: const InputDecoration(
+                    isCollapsed: true,
+                    hintText:
+                        'ip:192.168  port:443  severity:high  proto:TCP  …',
+                    hintStyle: TextStyle(color: Colors.white12, fontSize: 11),
+                    border: InputBorder.none,
+                    contentPadding: EdgeInsets.symmetric(vertical: 10),
+                  ),
+                ),
               ),
-            ),
+              // Help tooltip
+              _SearchHelpButton(),
+            ]),
           ),
-          Container(
-              width: 1,
-              height: 20,
-              color: Colors.white10,
-              margin: const EdgeInsets.symmetric(horizontal: 12)),
-          Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
+
+          // Divider
+          Container(height: 1, color: Colors.white.withOpacity(0.04)),
+
+          // ── Bottom row: filter chips + severity slider ──────────────────
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 5, 12, 5),
+            child: Row(children: [
+              // Type filter chips
               _buildFilterChip(provider, 'ALL', 'all'),
               _buildFilterChip(provider, 'NORMAL', 'normal'),
               _buildFilterChip(provider, 'THREATS', 'known_attack'),
               _buildFilterChip(provider, 'ZERO-DAY', 'zero_day'),
-            ],
+
+              Container(
+                  width: 1,
+                  height: 16,
+                  color: Colors.white10,
+                  margin: const EdgeInsets.symmetric(horizontal: 12)),
+
+              // Severity filter chips
+              const Text('SEVERITY',
+                  style: TextStyle(
+                      color: Colors.white24, fontSize: 8, letterSpacing: 1.2)),
+              const SizedBox(width: 8),
+              _buildSeverityChip(provider, 'ANY', null),
+              _buildSeverityChip(provider, 'LOW', 'low'),
+              _buildSeverityChip(provider, 'MED', 'medium'),
+              _buildSeverityChip(provider, 'HIGH', 'high'),
+              _buildSeverityChip(provider, 'CRIT', 'critical'),
+
+              const Spacer(),
+
+              // Active filter indicator
+              Consumer<IdsProvider>(
+                builder: (_, p, __) {
+                  final active = p.activeFilterCount;
+                  if (active == 0) return const SizedBox.shrink();
+                  return GestureDetector(
+                    onTap: () => p.clearAllFilters(),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: Colors.redAccent.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(3),
+                        border: Border.all(
+                            color: Colors.redAccent.withOpacity(0.3)),
+                      ),
+                      child: Row(mainAxisSize: MainAxisSize.min, children: [
+                        const Icon(Icons.filter_list,
+                            color: Colors.redAccent, size: 10),
+                        const SizedBox(width: 4),
+                        Text('$active ACTIVE · CLEAR',
+                            style: const TextStyle(
+                                color: Colors.redAccent,
+                                fontSize: 8,
+                                fontWeight: FontWeight.bold,
+                                letterSpacing: 0.5)),
+                      ]),
+                    ),
+                  );
+                },
+              ),
+            ]),
           ),
         ],
       ),
     );
   }
+
+  Widget _buildFilterChip(IdsProvider provider, String label, String filter) {
+    return Consumer<IdsProvider>(
+      builder: (context, p, _) {
+        final selected = p.currentFilter == filter;
+        return Padding(
+          padding: const EdgeInsets.only(right: 6),
+          child: InkWell(
+            onTap: () => p.setFilter(filter),
+            borderRadius: BorderRadius.circular(3),
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 180),
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color: selected
+                    ? const Color(0xFF00E5FF).withOpacity(0.12)
+                    : Colors.transparent,
+                borderRadius: BorderRadius.circular(3),
+                border: Border.all(
+                    color: selected
+                        ? const Color(0xFF00E5FF).withOpacity(0.5)
+                        : Colors.white10),
+              ),
+              child: Text(label,
+                  style: TextStyle(
+                      color:
+                          selected ? const Color(0xFF00E5FF) : Colors.white38,
+                      fontSize: 8,
+                      fontWeight: FontWeight.bold,
+                      letterSpacing: 0.5)),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildSeverityChip(
+      IdsProvider provider, String label, String? severity) {
+    final chipColors = {
+      'low': Colors.greenAccent,
+      'medium': Colors.yellowAccent,
+      'high': Colors.orange,
+      'critical': Colors.redAccent,
+    };
+    final color = severity != null
+        ? (chipColors[severity] ?? Colors.white54)
+        : Colors.white54;
+
+    return Consumer<IdsProvider>(
+      builder: (_, p, __) {
+        final selected = p.currentSeverityFilter == severity;
+        return Padding(
+          padding: const EdgeInsets.only(right: 5),
+          child: InkWell(
+            onTap: () => p.setSeverityFilter(severity),
+            borderRadius: BorderRadius.circular(3),
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 180),
+              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
+              decoration: BoxDecoration(
+                color: selected ? color.withOpacity(0.12) : Colors.transparent,
+                borderRadius: BorderRadius.circular(3),
+                border: Border.all(
+                    color: selected ? color.withOpacity(0.5) : Colors.white10),
+              ),
+              child: Text(label,
+                  style: TextStyle(
+                      color: selected ? color : Colors.white24,
+                      fontSize: 8,
+                      fontWeight: FontWeight.bold)),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  // ── Sidebar ───────────────────────────────────────────────────────────────
 
   Widget _buildSidebar(BuildContext context, IdsProvider provider) {
     return Container(
@@ -145,7 +285,6 @@ class DashboardScreen extends StatelessWidget {
                   fontWeight: FontWeight.bold,
                   letterSpacing: 1.5)),
           const SizedBox(height: 12),
-          // Only rebuilds the button when engine status toggles
           Selector<IdsProvider, bool>(
             selector: (_, p) => p.isRunning,
             builder: (context, isRunning, _) => _buildPowerControl(provider),
@@ -160,8 +299,6 @@ class DashboardScreen extends StatelessWidget {
                   fontWeight: FontWeight.bold,
                   letterSpacing: 1.2)),
           const SizedBox(height: 16),
-
-          // Individual Selectors ensure sidebar text doesn't jitter
           Selector<IdsProvider, int>(
             selector: (_, p) => p.totalPackets,
             builder: (_, val, __) =>
@@ -182,9 +319,7 @@ class DashboardScreen extends StatelessWidget {
             builder: (_, val, __) =>
                 _buildSidebarStat("NOVELTY", val, Colors.orangeAccent),
           ),
-
           const Spacer(),
-          // Adaptive Feedback button only shows when queue has items
           Selector<IdsProvider, int>(
             selector: (_, p) => p.totalSelected,
             builder: (context, total, _) => total > 0
@@ -314,40 +449,6 @@ class DashboardScreen extends StatelessWidget {
     );
   }
 
-  Widget _buildFilterChip(IdsProvider provider, String label, String filter) {
-    return Consumer<IdsProvider>(
-      builder: (context, p, _) {
-        bool selected = p.currentFilter == filter;
-        return Padding(
-          padding: const EdgeInsets.only(left: 6),
-          child: InkWell(
-            onTap: () => p.setFilter(filter),
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 200),
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-              decoration: BoxDecoration(
-                color: selected
-                    ? const Color(0xFF00E5FF).withOpacity(0.15)
-                    : Colors.transparent,
-                borderRadius: BorderRadius.circular(2),
-                border: Border.all(
-                    color: selected
-                        ? const Color(0xFF00E5FF).withOpacity(0.5)
-                        : Colors.white10),
-              ),
-              child: Text(label,
-                  style: TextStyle(
-                      color:
-                          selected ? const Color(0xFF00E5FF) : Colors.white38,
-                      fontSize: 8,
-                      fontWeight: FontWeight.bold)),
-            ),
-          ),
-        );
-      },
-    );
-  }
-
   void _showAddPacketDialog(BuildContext context) {
     final provider = Provider.of<IdsProvider>(context, listen: false);
     showDialog(
@@ -386,4 +487,116 @@ class DashboardScreen extends StatelessWidget {
       ),
     );
   }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Search help tooltip button
+// ═══════════════════════════════════════════════════════════════════════════
+
+class _SearchHelpButton extends StatelessWidget {
+  const _SearchHelpButton();
+
+  static const _helpItems = [
+    _HelpEntry('ip: ', '192.168', 'Filter by source or destination IP'),
+    _HelpEntry('port: ', '443', 'Filter by port number'),
+    _HelpEntry('proto: ', 'TCP', 'Filter by protocol (TCP/UDP/ICMP)'),
+    _HelpEntry('severity: ', 'high', 'low · medium · high · critical'),
+    _HelpEntry('type: ', 'attack', 'normal · known_attack · zero_day'),
+    _HelpEntry('anomaly: ', '> 0.5', 'Anromaly score threshold (e.g. >0.3)'),
+    _HelpEntry('', '', ''), // spacer
+    _HelpEntry('Example:', '', 'ip:192.168 severity:high proto:TCP'),
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      richMessage: WidgetSpan(
+        child: Container(
+          width: 320,
+          padding: const EdgeInsets.all(14),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text('SEARCH SYNTAX',
+                  style: TextStyle(
+                      color: Color(0xFF00E5FF),
+                      fontSize: 11,
+                      fontWeight: FontWeight.bold,
+                      letterSpacing: 1.5)),
+              const SizedBox(height: 10),
+              ..._helpItems.map((e) {
+                if (e.prefix.isEmpty && e.example.isEmpty) {
+                  return const Divider(color: Colors.white12, height: 16);
+                }
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 7),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      SizedBox(
+                        width: 80,
+                        child: RichText(
+                          text: TextSpan(children: [
+                            TextSpan(
+                                text: e.prefix,
+                                style: const TextStyle(
+                                    color: Color(0xFF00E5FF),
+                                    fontSize: 10,
+                                    fontFamily: 'monospace',
+                                    fontWeight: FontWeight.bold)),
+                            TextSpan(
+                                text: e.example.isNotEmpty ? e.example : '',
+                                style: const TextStyle(
+                                    color: Colors.white54,
+                                    fontSize: 10,
+                                    fontFamily: 'monospace')),
+                          ]),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(e.description,
+                            style: const TextStyle(
+                                color: Colors.white54, fontSize: 10)),
+                      ),
+                    ],
+                  ),
+                );
+              }),
+            ],
+          ),
+        ),
+      ),
+      decoration: BoxDecoration(
+        color: const Color(0xFF0D1117),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.white.withOpacity(0.08)),
+        boxShadow: [
+          BoxShadow(
+              color: Colors.black.withOpacity(0.5),
+              blurRadius: 16,
+              offset: const Offset(0, 4)),
+        ],
+      ),
+      preferBelow: true,
+      triggerMode: TooltipTriggerMode.tap,
+      showDuration: const Duration(seconds: 8),
+      child: Container(
+        padding: const EdgeInsets.all(6),
+        child: const Icon(
+          Icons.help_outline_rounded,
+          color: Colors.white24,
+          size: 15,
+        ),
+      ),
+    );
+  }
+}
+
+class _HelpEntry {
+  final String prefix;
+  final String example;
+  final String description;
+  const _HelpEntry(this.prefix, this.example, this.description);
 }

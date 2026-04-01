@@ -18,11 +18,11 @@ Design a Mobile Monitoring & Alert App for IDS systems, integrating 2–3 core a
 
 8-Edge Device Sync – Sync with edge nodes (e.g., routers) that run ensemble IDS components (Topic 2).
 
-9-Historical Alert Analytics – Trend charts of intrusion types, volume, and performance metrics.
+9-Historical Alert Analytics – Trend charts of intrusion types, volume, and performance metrics.(done)
 
-10-User-Configurable Alerts – Set custom filters (by severity, type, source IP).
+10-User-Configurable Alerts – Set custom filters (by severity, type, source IP).(done)
 
-11-Explainable Summary Reports – Generate daily/weekly summaries with explainability insights.
+11-Explainable Summary Reports – Generate daily/weekly summaries with explainability insights.(ongoing)
 
 12-Edge-Local Computation – Run lightweight detection directly on-device for offline alerting (Topic 1).
 

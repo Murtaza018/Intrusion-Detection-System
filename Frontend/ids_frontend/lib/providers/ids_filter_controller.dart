@@ -12,6 +12,54 @@ class IdsFilterController {
 
   final IdsState _state;
 
+// Inside IdsFilterController class
+
+  void setSeverityFilter(String? severity) {
+    _state.currentSeverityFilter = severity;
+    // Note: _buildFilteredList is called automatically by state.filteredPackets getter
+  }
+
+  void updateSearchQuery(String query) {
+    _state.setSearchQuery(query);
+  }
+
+  void _applyFilters() {
+    // Since IdsState uses a lazy getter (filteredPackets),
+    // we just need to tell it that the data is 'dirty'.
+    _state.markDirty();
+  }
+
+  bool _matchesSearch(Packet packet, String query) {
+    for (final token in query.split(' ')) {
+      if (token.isEmpty) continue;
+
+      if (token.startsWith('ip:')) {
+        final val = token.substring(3);
+        if (!packet.srcIp.contains(val) && !packet.dstIp.contains(val))
+          return false;
+      } else if (token.startsWith('port:')) {
+        final p = token.substring(5);
+        if (packet.srcPort.toString() != p && packet.dstPort.toString() != p)
+          return false;
+      } else if (token.startsWith('proto:')) {
+        if (packet.protocol.toLowerCase() != token.substring(6)) return false;
+      } else if (token.startsWith('anomaly:>')) {
+        final threshold = double.tryParse(token.substring(9)) ?? 0;
+        if (packet.gnnAnomaly <= threshold) return false;
+      } else if (token.startsWith('anomaly:<')) {
+        final threshold = double.tryParse(token.substring(9)) ?? 1;
+        if (packet.gnnAnomaly >= threshold) return false;
+      } else {
+        // General text match across available fields
+        final lowerToken = token.toLowerCase();
+        if (!packet.summary.toLowerCase().contains(lowerToken) &&
+            !packet.srcIp.contains(lowerToken) &&
+            !packet.dstIp.contains(lowerToken) &&
+            !packet.protocol.toLowerCase().contains(lowerToken)) return false;
+      }
+    }
+    return true;
+  }
   // ---------------------------------------------------------------------------
   // Filter & search
   // ---------------------------------------------------------------------------
@@ -23,15 +71,13 @@ class IdsFilterController {
     });
   }
 
-  void updateSearchQuery(String query) {
-    _state.setActiveFilters({
-      ..._state.activeFilters,
-      'search': query,
-    });
-  }
-
   void clearAllFilters() {
-    _state.setActiveFilters({'status': 'all', 'search': ''});
+    _state.currentSeverityFilter = null;
+    _state.setSearchQuery('');
+    _state.setActiveFilters({
+      'status': 'all',
+      'search': '',
+    });
   }
 
   // ---------------------------------------------------------------------------

@@ -18,7 +18,9 @@ from retrain_manager import RetrainManager, JobStatus
 from gan_retrainer import GanRetrainer, JitterRetrainer
 from config import API_KEY
 from detector import Detector
-from datetime import datetime
+from datetime import datetime,timedelta,timezone
+
+
 
 
 def _ts_to_epoch(obj):
@@ -134,6 +136,130 @@ class APIServer:
             return decorated
 
         self._require_api_key = _require_api_key
+
+        def _slot_of(ts: int, bucket: int) -> int:
+            return ts - (ts % bucket)
+
+
+        def _window_to_timedelta(window: str) -> timedelta:
+            if window == "1d":
+                return timedelta(days=1)
+            elif window == "1w":
+                return timedelta(weeks=1)
+            else:
+                raise ValueError("Unsupported window")
+
+
+        @self.app.route("/api/report/<string:window>", methods=['GET'])
+        @self._require_api_key
+        def get_summary_report(window):
+            """
+            window: "1d" or "1w"
+            """
+            try:
+                now = datetime.now(timezone.utc)
+                end = now
+                start = end - _window_to_timedelta(window)
+
+                # For demo, just use same query as history but with more details
+                all_packets = self.packet_storage.get_packets(limit=100_000, status_filter=None)
+
+                # Filter by time window
+                packets=all_packets
+                # packets = []
+                for p in all_packets:
+                    ts_str = p.get("timestamp")
+                    if not ts_str:
+                        continue
+                    try:
+                        ts = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
+
+                        # Ensure timezone-aware UTC
+                        if ts.tzinfo is None:
+                            ts = ts.replace(tzinfo=timezone.utc)
+                        else:
+                            ts = ts.astimezone(timezone.utc)
+
+                    except Exception:
+                        continue
+                    if start <= ts <= end:
+                        packets.append(p)
+
+                # Simple stats
+                counts = {"normal": 0, "attack": 0, "zero_day": 0}
+                mae_values = []
+
+                for p in packets:
+                    status = p.get("status", "unknown")
+                    expl = p.get("explanation", {}) or {}
+
+                    mae = float(expl.get("mae_anomaly", 0.0))
+                    if 0.0 < mae <= 1.0:
+                        mae_values.append(mae)
+
+                    if status == "normal":
+                        counts["normal"] += 1
+                    elif status == "known_attack":
+                        counts["attack"] += 1
+                    elif status == "zero_day":
+                        counts["zero_day"] += 1
+
+                # 1. Explainable insight 1: MAE clusters
+                if mae_values:
+                    avg_mae = sum(mae_values) / len(mae_values)
+                    high_mae = [m for m in mae_values if m > 0.3]
+                else:
+                    avg_mae = 0.0
+                    high_mae = []
+
+                # 2. Simple executive‑style text
+                total = counts["normal"] + counts["attack"] + counts["zero_day"]
+                if total == 0:
+                    text = "No traffic observed in the selected period."
+                else:
+                    if counts["zero_day"] > 0:
+                        text = (
+                            f"During the last {window}, the system observed {total} packets, "
+                            f"with {counts['attack'] + counts['zero_day']} classified as malicious "
+                            f"({counts['zero_day']} classified as zero‑day). "
+                            f"This indicates the presence of known attack patterns and at least "
+                            f"one potentially novel intrusion pattern. "
+                        )
+                    else:
+                        text = (
+                            f"During the last {window}, the system observed {total} packets, "
+                            f"with {counts['attack']} classified as attacks. "
+                            f"Most traffic is benign, but there are repeated attack attempts."
+                        )
+
+                payload = {
+                    "window": window,
+                    "start_time": start.isoformat(),
+                    "end_time": end.isoformat(),
+                    "summary_text": text,
+                    "stats": {
+                        "total_packets": total,
+                        "normal": counts["normal"],
+                        "attack": counts["attack"],
+                        "zero_day": counts["zero_day"],
+                        "detection_rate": round(
+                            (counts["attack"] + counts["zero_day"]) / max(1, total),
+                            4,
+                        ),
+                    },
+                    "explainables": {
+                        "mae_anomaly": {
+                            "avg": round(avg_mae, 4),
+                            "high_mae_count": len(high_mae),
+                            "high_mae_example": (high_mae[0] if high_mae else 0.0),
+                        },
+                    },
+                }
+                return self._secure_response(payload)
+
+            except Exception as e:
+                traceback.print_exc()
+                return self._secure_response({"error": str(e)}, 500)
 
         # ── 1. Pipeline control ───────────────────────────────────────
 

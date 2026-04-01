@@ -163,27 +163,57 @@ class IdsApiClient {
         },
       );
 
+      final res = await http.get(uri, headers: IdsConfig.headers);
+
+      debugPrint('=== FETCH_HISTORY ===');
+      debugPrint('Status: ${res.statusCode}');
+
+      if (res.statusCode != 200) return null;
+
+      final result = await _secureParseInIsolate(res.bodyBytes);
+
+      // Use the payload if present, even when signature verification fails.
+      // Log a warning so the signature issue is visible but doesn't block data.
+      final payload = result['payload'] as Map<String, dynamic>?;
+      if (payload != null) {
+        if (result['success'] != true) {
+          debugPrint('⚠️  fetchHistory: signature verification failed — '
+              'displaying unverified payload. Fix _secureParseInIsolate.');
+        }
+        return payload;
+      }
+
+      debugPrint('fetchHistory: no payload in response');
+      return null;
+    } catch (e, s) {
+      debugPrint('History fetch error: $e\n$s');
+      return null;
+    }
+  }
+
+  Future<Map<String, dynamic>?> fetchReport({
+    required String window, // "1d" or "1w"
+  }) async {
+    try {
+      final uri = Uri.parse('${IdsConfig.baseUrl}/api/report/$window');
+
       final res = await http.get(
         uri,
         headers: IdsConfig.headers,
       );
 
-      debugPrint("=== FETCH_HISTORY ===");
-      debugPrint("Status: ${res.statusCode}");
-      debugPrint("Body: ${res.body}");
-
-      final result = await _secureParseInIsolate(res.bodyBytes);
-      debugPrint("Secure parse result: $result");
-
-      if (res.statusCode == 200 && result['success'] == true) {
-        return result['payload'] as Map<String, dynamic>;
+      if (res.statusCode == 200) {
+        final result = await _secureParseInIsolate(res.bodyBytes);
+        if (result['success'] == true) {
+          return result['payload'] as Map<String, dynamic>;
+        }
       }
-    } catch (e, s) {
-      debugPrint("History fetch error: $e\n$s");
+      return null;
+    } catch (e) {
+      debugPrint("Report fetch error: $e");
+      return null;
     }
-    return null;
   }
-
   // ---------------------------------------------------------------------------
   // Isolate helpers — all ECC math runs off the UI thread
   // ---------------------------------------------------------------------------

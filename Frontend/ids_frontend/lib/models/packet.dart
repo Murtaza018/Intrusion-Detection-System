@@ -14,6 +14,7 @@ class Packet {
   final double confidence;
   final double maeAnomaly;
   final double gnnAnomaly;
+
   final Map<String, dynamic>? explanation;
   String? userLabel;
 

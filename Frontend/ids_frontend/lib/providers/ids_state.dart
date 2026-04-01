@@ -18,6 +18,30 @@ import 'package:flutter/foundation.dart';
 import '../models/packet.dart';
 
 class IdsState with ChangeNotifier {
+  // Inside IdsState class
+  String? _currentSeverityFilter;
+  String? get currentSeverityFilter => _currentSeverityFilter;
+
+  set currentSeverityFilter(String? value) {
+    _currentSeverityFilter = value;
+    notifyListeners();
+  }
+
+  int get activeFilterCount {
+    int count = 0;
+    if (currentFilter != 'all') count++;
+    if (_currentSeverityFilter != null) count++;
+    final query = _activeFilters['search'] as String;
+    if (query.isNotEmpty) count++;
+    return count;
+  }
+
+  // 2. Add a specific setter for Search Query since it's inside a Map
+  void setSearchQuery(String query) {
+    _activeFilters['search'] = query;
+    _invalidateFilterCache();
+    notifyListeners();
+  }
   // ---------------------------------------------------------------------------
   // Pipeline
   // ---------------------------------------------------------------------------
@@ -119,6 +143,8 @@ class IdsState with ChangeNotifier {
   int get normalCount => _normalCount;
   int get attackCount => _attackCount;
   int get zeroDayCount => _zeroDayCount;
+  // Add this alongside your other getters
+  List<Packet> get allPackets => _packets;
 
   void updateStats({
     required int total,
@@ -194,16 +220,67 @@ class IdsState with ChangeNotifier {
     return _cachedFiltered!;
   }
 
+  // Inside IdsState class in ids_state.dart
+
   List<Packet> _buildFilteredList() {
+    // 1. Get current status and query from your existing Map/fields
     final status = _activeFilters['status'] as String;
     final query = (_activeFilters['search'] as String).toLowerCase();
+
     return _packets.where((p) {
+      // 2. Type/Status Filter (Using p.status from your Packet model)
       if (status != 'all' && p.status != status) return false;
-      if (query.isEmpty) return true;
-      return p.srcIp.contains(query) ||
-          p.dstIp.contains(query) ||
-          p.protocol.toLowerCase().contains(query);
+
+      // 3. Severity Filter (Using p.gnnAnomaly from your Packet model)
+      if (_currentSeverityFilter != null) {
+        final score = p.gnnAnomaly;
+        final passes = switch (_currentSeverityFilter) {
+          'low' => score >= 0.1 && score < 0.3,
+          'medium' => score >= 0.3 && score < 0.6,
+          'high' => score >= 0.6 && score < 0.8,
+          'critical' => score >= 0.8,
+          _ => true,
+        };
+        if (!passes) return false;
+      }
+
+      // 4. Search Query logic
+      if (query.isNotEmpty) {
+        return _matchesSearch(p, query);
+      }
+
+      return true;
     }).toList(growable: false);
+  }
+
+  bool _matchesSearch(Packet packet, String query) {
+    for (final token in query.split(' ')) {
+      if (token.isEmpty) continue;
+
+      if (token.startsWith('ip:')) {
+        final val = token.substring(3);
+        if (!packet.srcIp.contains(val) && !packet.dstIp.contains(val))
+          return false;
+      } else if (token.startsWith('port:')) {
+        final p = token.substring(5);
+        if (packet.srcPort.toString() != p && packet.dstPort.toString() != p)
+          return false;
+      } else if (token.startsWith('proto:')) {
+        if (packet.protocol.toLowerCase() != token.substring(6)) return false;
+      } else if (token.startsWith('anomaly:>')) {
+        final threshold = double.tryParse(token.substring(9)) ?? 0;
+        if (packet.gnnAnomaly <= threshold) return false;
+      } else if (token.startsWith('anomaly:<')) {
+        final threshold = double.tryParse(token.substring(9)) ?? 1;
+        if (packet.gnnAnomaly >= threshold) return false;
+      } else {
+        if (!packet.srcIp.contains(query) &&
+            !packet.dstIp.contains(query) &&
+            !packet.protocol.toLowerCase().contains(query) &&
+            !packet.summary.toLowerCase().contains(query)) return false;
+      }
+    }
+    return true;
   }
 
   // ---------------------------------------------------------------------------

@@ -78,6 +78,13 @@ class IdsProvider with ChangeNotifier {
   void setConsistencyStatus(bool c, bool p) =>
       _filters.setConsistencyStatus(c, p);
   void clearQueues() => _filters.clearQueues();
+  // Add to "State passthrough getters" section
+  // State passthrough getters
+  int get activeFilterCount => _state.activeFilterCount;
+  String? get currentSeverityFilter => _state.currentSeverityFilter;
+
+// Filter & selection passthrough
+  void setSeverityFilter(String? s) => _filters.setSeverityFilter(s);
 
   // ---------------------------------------------------------------------------
   // Pipeline control

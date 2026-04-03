@@ -460,18 +460,28 @@ class _GraphViewWidgetState extends State<GraphViewWidget>
             _DetailField('Subnet', node.subnet,
                 valueStyle:
                     const TextStyle(color: Colors.white70, fontSize: 12)),
-            _DetailField('Zone', node.isDmz ? 'DMZ 🛡️' : 'Internal',
+
+            // 1. Updated Zone to handle External, DMZ, and Internal
+            _DetailField(
+                'Zone',
+                node.isDmz
+                    ? 'DMZ 🛡️'
+                    : (node.subnet.contains('External')
+                        ? 'External 🌍'
+                        : 'Internal 🔒'),
                 valueStyle: TextStyle(
                     color: node.isDmz ? Colors.orangeAccent : Colors.white70,
                     fontSize: 12,
                     fontWeight:
                         node.isDmz ? FontWeight.bold : FontWeight.normal)),
-            if (node.isGateway)
-              _DetailField('Role', 'Gateway 🌐',
-                  valueStyle: const TextStyle(
-                      color: Colors.greenAccent,
-                      fontSize: 12,
-                      fontWeight: FontWeight.bold)),
+
+            // 2. Updated Gateway to always show True or False
+            _DetailField('Gateway', node.isGateway ? 'True 🌐' : 'False ❌',
+                valueStyle: TextStyle(
+                    color: node.isGateway ? Colors.greenAccent : Colors.white54,
+                    fontSize: 12,
+                    fontWeight:
+                        node.isGateway ? FontWeight.bold : FontWeight.normal)),
 
             _DetailField('Connections', '$conns peers',
                 valueStyle:

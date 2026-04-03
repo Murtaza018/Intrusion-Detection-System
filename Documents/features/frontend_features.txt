@@ -29,3 +29,5 @@ Design a Mobile Monitoring & Alert App for IDS systems, integrating 2–3 core a
 13-Secure Authentication & Encryption – Protect app communications with IDS backend.(done)(Murtaza)
 
 14-Model Update Management – Notifications and progress for when new detection model versions are downloaded (Topics 1 & 2).
+
+15-Add a feature to configure/add own DMZ(get_graph() in api_server.py)

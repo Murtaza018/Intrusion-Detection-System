@@ -337,6 +337,79 @@ class _GraphViewWidgetState extends State<GraphViewWidget>
     );
   }
 
+  // Widget _buildDetailPanel(GraphNode node, Map<int, int> degreeMap) {
+  //   final conns = degreeMap[node.id] ?? 0;
+  //   final severity = _severityLabel(node.anomaly);
+  //   final sColor = _anomalyColor(node.anomaly);
+
+  //   return _Panel(
+  //     minWidth: 260,
+  //     child: Column(
+  //         crossAxisAlignment: CrossAxisAlignment.start,
+  //         mainAxisSize: MainAxisSize.min,
+  //         children: [
+  //           // Header
+  //           Row(children: [
+  //             Container(
+  //                 width: 10,
+  //                 height: 10,
+  //                 decoration:
+  //                     BoxDecoration(color: sColor, shape: BoxShape.circle)),
+  //             const SizedBox(width: 8),
+  //             const Text('NODE DETAILS',
+  //                 style: TextStyle(
+  //                     color: Colors.white70,
+  //                     fontSize: 11,
+  //                     fontWeight: FontWeight.bold,
+  //                     letterSpacing: 1.3)),
+  //             const Spacer(),
+  //             GestureDetector(
+  //                 onTap: _clearSelection,
+  //                 child:
+  //                     const Icon(Icons.close, color: Colors.white38, size: 16)),
+  //           ]),
+  //           const SizedBox(height: 10),
+  //           const Divider(color: Colors.white12, height: 1),
+  //           const SizedBox(height: 10),
+  //           // Fields
+  //           _DetailField('IP Address', node.ip,
+  //               valueStyle: const TextStyle(
+  //                   color: Colors.white,
+  //                   fontSize: 13,
+  //                   fontWeight: FontWeight.w600,
+  //                   fontFamily: 'monospace')),
+  //           _DetailField('Node ID', '#${node.id}',
+  //               valueStyle:
+  //                   const TextStyle(color: Colors.cyanAccent, fontSize: 12)),
+  //           _DetailField(
+  //             'Anomaly Score',
+  //             '${(node.anomaly * 100).toStringAsFixed(2)}%',
+  //             valueStyle: TextStyle(
+  //                 color: sColor, fontSize: 13, fontWeight: FontWeight.bold),
+  //           ),
+  //           _DetailField('Connections', '$conns peers',
+  //               valueStyle:
+  //                   const TextStyle(color: Colors.white70, fontSize: 12)),
+  //           const SizedBox(height: 8),
+  //           // Severity badge
+  //           Container(
+  //             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+  //             decoration: BoxDecoration(
+  //               color: sColor.withOpacity(0.15),
+  //               borderRadius: BorderRadius.circular(20),
+  //               border: Border.all(color: sColor.withOpacity(0.5)),
+  //             ),
+  //             child: Text(severity,
+  //                 style: TextStyle(
+  //                     color: sColor,
+  //                     fontSize: 11,
+  //                     fontWeight: FontWeight.bold,
+  //                     letterSpacing: 1.2)),
+  //           ),
+  //         ]),
+  //   );
+  // }
+
   Widget _buildDetailPanel(GraphNode node, Map<int, int> degreeMap) {
     final conns = degreeMap[node.id] ?? 0;
     final severity = _severityLabel(node.anomaly);
@@ -371,7 +444,8 @@ class _GraphViewWidgetState extends State<GraphViewWidget>
             const SizedBox(height: 10),
             const Divider(color: Colors.white12, height: 1),
             const SizedBox(height: 10),
-            // Fields
+
+            // --- UPDATED FIELDS START HERE ---
             _DetailField('IP Address', node.ip,
                 valueStyle: const TextStyle(
                     color: Colors.white,
@@ -381,15 +455,35 @@ class _GraphViewWidgetState extends State<GraphViewWidget>
             _DetailField('Node ID', '#${node.id}',
                 valueStyle:
                     const TextStyle(color: Colors.cyanAccent, fontSize: 12)),
+
+            // NEW: Subnet, DMZ, and Gateway Info
+            _DetailField('Subnet', node.subnet,
+                valueStyle:
+                    const TextStyle(color: Colors.white70, fontSize: 12)),
+            _DetailField('Zone', node.isDmz ? 'DMZ 🛡️' : 'Internal',
+                valueStyle: TextStyle(
+                    color: node.isDmz ? Colors.orangeAccent : Colors.white70,
+                    fontSize: 12,
+                    fontWeight:
+                        node.isDmz ? FontWeight.bold : FontWeight.normal)),
+            if (node.isGateway)
+              _DetailField('Role', 'Gateway 🌐',
+                  valueStyle: const TextStyle(
+                      color: Colors.greenAccent,
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold)),
+
+            _DetailField('Connections', '$conns peers',
+                valueStyle:
+                    const TextStyle(color: Colors.white70, fontSize: 12)),
             _DetailField(
               'Anomaly Score',
               '${(node.anomaly * 100).toStringAsFixed(2)}%',
               valueStyle: TextStyle(
                   color: sColor, fontSize: 13, fontWeight: FontWeight.bold),
             ),
-            _DetailField('Connections', '$conns peers',
-                valueStyle:
-                    const TextStyle(color: Colors.white70, fontSize: 12)),
+            // --- UPDATED FIELDS END HERE ---
+
             const SizedBox(height: 8),
             // Severity badge
             Container(

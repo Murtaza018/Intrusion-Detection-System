@@ -462,6 +462,48 @@ class APIServer:
             return self._secure_response({"message": f"Job {job.job_id} marked as cancelled."})
         
 
+        # @self.app.route("/api/graph", methods=['GET'])
+        # @self._require_api_key
+        # def get_graph():
+        #     """
+        #     Expose live network graph topology + anomaly hot‑spots.
+        #     Requires X-API-Key (ECC‑signed JSON response).
+        #     """
+        #     try:
+        #         # Get detector from pipeline_manager
+        #         if not hasattr(self.pipeline_manager, 'detector'):
+        #             return self._secure_response(
+        #                 {"error": "Detector not initialized"}, 500
+        #             )
+
+        #         detector = self.pipeline_manager.detector
+        #         if not hasattr(detector, "get_graph_snapshot"):
+        #             return self._secure_response(
+        #                 {"error": "Detector missing get_graph_snapshot method"}, 500
+        #             )
+
+        #         # 1. Get snapshot
+        #         data = detector.get_graph_snapshot()
+        #         if data is None:
+        #             return self._secure_response(
+        #                 {"nodes": [], "edges": [], "message": "Graph empty or not initialized."},
+        #             )
+
+        #         # 2. Add metadata (optional, for UI)
+        #         stats = self.packet_storage.get_stats()
+        #         data["total_packets"] = stats.get("total_packets", 0)
+        #         data["threats"] = stats.get("attack_count", 0)
+        #         data["zero_days"] = stats.get("zero_day_count", 0)
+
+        #         return self._secure_response(data)
+
+        #     except Exception as e:
+        #         traceback.print_exc()
+        #         return self._secure_response(
+        #             {"error": str(e)},
+        #             500
+        #         )
+
         @self.app.route("/api/graph", methods=['GET'])
         @self._require_api_key
         def get_graph():
@@ -489,6 +531,33 @@ class APIServer:
                         {"nodes": [], "edges": [], "message": "Graph empty or not initialized."},
                     )
 
+                # --- NEW LOGIC: ADD SUBNET, DMZ, & GATEWAY DATA ---
+                if "nodes" in data:
+                    for node in data["nodes"]:
+                        ip = node.get("ip", "")
+                        
+                        # 1. Gateway Detection (typically ends in .1 or .254)
+                        if ip.endswith(".1") or ip.endswith(".254"):
+                            node["isGateway"] = True
+                        else:
+                            node["isGateway"] = False
+                            
+                        # 2. DMZ Detection (Example: you can customize these IPs based on your dataset)
+                        if ip.startswith("172.16.") or ip in ["192.168.1.10", "192.168.1.11", "10.0.0.5"]:
+                            node["isDmz"] = True
+                            node["subnet"] = "DMZ-Zone"
+                        else:
+                            node["isDmz"] = False
+                            
+                        # 3. Standard Subnet Mapping
+                        if not node["isDmz"]:
+                            parts = ip.split('.')
+                            if len(parts) == 4:
+                                node["subnet"] = f"{parts[0]}.{parts[1]}.{parts[2]}.0/24"
+                            else:
+                                node["subnet"] = "External / Unknown"
+                # --------------------------------------------------
+
                 # 2. Add metadata (optional, for UI)
                 stats = self.packet_storage.get_stats()
                 data["total_packets"] = stats.get("total_packets", 0)
@@ -503,6 +572,7 @@ class APIServer:
                     {"error": str(e)},
                     500
                 )
+
         # inside class APIServer
 # ── 6. Historical Alert Analytics ──────────────────────────────────
 

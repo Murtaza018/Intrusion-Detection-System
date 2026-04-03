@@ -2,30 +2,30 @@ Mobile App Functional Features (10+):
 
 Design a Mobile Monitoring & Alert App for IDS systems, integrating 2–3 core advanced features drawn from future directions above (highlighted with bold):
 
-1-Real-time Alert Notifications – Push alerts when anomalies detected.
+1-Real-time Alert Notifications – Push alerts when anomalies detected.(ongoing)(Aneeq)
 
-2-Visual Explanation Dashboard – Show feature attributions via SHAP/LIME (from Topic 2 & 3 future directions).(Done)
+2-Visual Explanation Dashboard – Show feature attributions via SHAP/LIME (from Topic 2 & 3 future directions).(Done)(Anas)
 
-3-Feedback Submission – Users can mark alerts as false positives/negatives, feeding back to retraining (Topic 3).(done)
+3-Feedback Submission – Users can mark alerts as false positives/negatives, feeding back to retraining (Topic 3).(done)(Anas)
 
-4-Live Network Graph View – Interactive visualization of network graph topology and anomaly hot-spots (Topic 2).(Done)
+4-Live Network Graph View – Interactive visualization of network graph topology and anomaly hot-spots (Topic 2).(Done)(Aneeq)
 
 5-Adaptive Sensitivity Control – Use insights from explanations to adjust detection thresholds dynamically (Topic 3).
 
-6-Embedded Self-Supervised Module – Lightweight MAE-based anomaly embedding engine runs locally for preliminary filtering (Topic 1).(done)
+6-Embedded Self-Supervised Module – Lightweight MAE-based anomaly embedding engine runs locally for preliminary filtering (Topic 1).(done)(Aneeq)
 
 7-Continual Learning Updates – App periodically receives model updates reflecting streaming data learning (Topic 1).
 
 8-Edge Device Sync – Sync with edge nodes (e.g., routers) that run ensemble IDS components (Topic 2).
 
-9-Historical Alert Analytics – Trend charts of intrusion types, volume, and performance metrics.(done)
+9-Historical Alert Analytics – Trend charts of intrusion types, volume, and performance metrics.(done)(Anas)
 
-10-User-Configurable Alerts – Set custom filters (by severity, type, source IP).(done)
+10-User-Configurable Alerts – Set custom filters (by severity, type, source IP).(done)(Murtaza)
 
-11-Explainable Summary Reports – Generate daily/weekly summaries with explainability insights.(ongoing)
+11-Explainable Summary Reports – Generate daily/weekly summaries with explainability insights.(ongoing)(Murtaza)
 
 12-Edge-Local Computation – Run lightweight detection directly on-device for offline alerting (Topic 1).
 
-13-Secure Authentication & Encryption – Protect app communications with IDS backend.(done)
+13-Secure Authentication & Encryption – Protect app communications with IDS backend.(done)(Murtaza)
 
 14-Model Update Management – Notifications and progress for when new detection model versions are downloaded (Topics 1 & 2).

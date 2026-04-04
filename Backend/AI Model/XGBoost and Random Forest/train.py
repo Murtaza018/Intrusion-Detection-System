@@ -29,6 +29,17 @@ def load_data():
     X_test  = np.load(os.path.join(base_path, "X_test.npy"))
     y_test  = np.load(os.path.join(base_path, "y_test.npy"))
 
+    # ---------------------------------------------------------
+    # [!] THE FIX: Enforce strictly 78 features for the Cascade
+    # ---------------------------------------------------------
+    if X_train.shape[1] > 78:
+        print(f"[*] Notice: Truncating features from {X_train.shape[1]} down to exactly 78...")
+        X_train = X_train[:, :78]
+        X_val   = X_val[:, :78]
+        X_test  = X_test[:, :78]
+    elif X_train.shape[1] < 78:
+        print(f"[!] Warning: Data only has {X_train.shape[1]} features, expected 78!")
+
     print(f"[+] Loaded train: X={X_train.shape}, y={y_train.shape}")
     print(f"[+] Loaded val:   X={X_val.shape}, y={y_val.shape}")
     print(f"[+] Loaded test:  X={X_test.shape}, y={y_test.shape}")
@@ -41,16 +52,12 @@ def evaluate(model, X, y, label="TEST"):
     preds = model.predict(X)
 
     # Use 'weighted' average to handle both Binary and Multiclass safely
-    # If strictly binary, 'binary' is default, but 'weighted' works for both without crashing
     acc  = accuracy_score(y, preds)
     prec = precision_score(y, preds, average='weighted', zero_division=0)
     rec  = recall_score(y, preds, average='weighted', zero_division=0)
     f1   = f1_score(y, preds, average='weighted', zero_division=0)
 
     print(f"[RESULT] {label}: Acc={acc:.4f}  Prec={prec:.4f}  Rec={rec:.4f}  F1={f1:.4f}")
-    
-    # Optional: Print full report for detailed class breakdown
-    # print(classification_report(y, preds))
 
 
 def print_header(text):
@@ -65,7 +72,7 @@ def print_header(text):
 
 if __name__ == "__main__":
 
-    print("\n--- 🚀 Initializing Ensemble Training (RF + XGB on CIC-IDS-2017-Processed) ---")
+    print("\n--- 🚀 Initializing Ensemble Training (78-Feature Cascade Mode) ---")
 
     X_train, y_train, X_val, y_val, X_test, y_test = load_data()
     
@@ -74,17 +81,20 @@ if __name__ == "__main__":
 
     os.makedirs("models_ensemble", exist_ok=True)
 
+    # Determine if we are doing Binary or Multiclass for XGBoost
+    num_classes = len(np.unique(y_train))
+    xgb_objective = 'binary:logistic' if num_classes == 2 else 'multi:softprob'
+
     # =====================================================
     # 🌲 TRAIN RANDOM FOREST
     # =====================================================
-    print_header("🌲 Training Random Forest...")
+    print_header("🌲 Training Random Forest (78 Features)...")
 
-    # Note: verbose=2 allows you to see progress inside the model training
     rf = RandomForestClassifier(
         n_estimators=200,
         max_depth=None,
-        n_jobs=1,       # Increase this (e.g., -1) for faster training if consistency isn't critical
-        verbose=2       # Logic change: Built-in logging is better than a manual loop
+        n_jobs=-1,      # Sped up: uses all available CPU cores
+        verbose=2 
     )
 
     start = time.time()
@@ -103,30 +113,27 @@ if __name__ == "__main__":
     # =====================================================
     # 🚀 TRAIN XGBOOST
     # =====================================================
-    print_header("🚀 Training XGBoost...")
+    print_header("🚀 Training XGBoost (78 Features)...")
 
     xgb = XGBClassifier(
-        objective='binary:logistic', # Ensure your labels are 0 and 1. If multiclass, use 'multi:softmax'
-        eval_metric='logloss',
+        objective=xgb_objective, 
+        eval_metric='mlogloss' if num_classes > 2 else 'logloss',
+        num_class=num_classes if num_classes > 2 else None,
         n_estimators=200,
         learning_rate=0.05,
         max_depth=6,
         subsample=0.8,
         colsample_bytree=0.8,
         tree_method='hist',
-        n_jobs=1,
-        # verbosity=1 will print warnings/info. 
-        # XGBoost doesn't support a simple CLI progress bar easily without callback functions,
-        # but 'verbose=True' in fit() prints evaluation metric history.
+        n_jobs=-1,       # Sped up: uses all available CPU cores
     )
 
     start = time.time()
     
-    # We pass eval_set to monitor performance during training, ensuring it's actually learning
     xgb.fit(
         X_train, y_train, 
         eval_set=[(X_val, y_val)], 
-        verbose=False  # Set to True if you want to see logloss decrease every iteration
+        verbose=False  
     )
     
     end = time.time()
@@ -139,4 +146,4 @@ if __name__ == "__main__":
     joblib.dump(xgb, "./models_ensemble/xgb_model.joblib")
     print("[+] XGB model saved to: ./models_ensemble/xgb_model.joblib")
 
-    print("\n🎉 TRAINING COMPLETE: Both RF + XGB models saved!\n")
+    print("\n🎉 TRAINING COMPLETE: Both 78-Feature RF + XGB models saved!\n")

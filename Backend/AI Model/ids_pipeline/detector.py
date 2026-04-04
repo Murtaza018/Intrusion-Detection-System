@@ -100,14 +100,13 @@ class Detector:
             self.packet_queue.put(packet)
 
     def _detection_worker(self):
-        """Main detection loop incorporating sensory fusion (95 features)"""
+        """Main detection loop using True Cascade Architecture for max speed"""
         print("[*] Detection worker started")
         gnn_model = self.model_loader.get_gnn_model()
         mae_model = self.model_loader.get_mae_model()
         
         while self.running:
             try:
-                # SILENTLY handle empty queue during low traffic
                 try:
                     packet = self.packet_queue.get(timeout=1)
                 except queue.Empty:
@@ -115,7 +114,7 @@ class Detector:
                 
                 if packet is None: break
                 
-                # 1. Feature Extraction & Scaling (Raw 78)
+                # 1. Feature Extraction (Raw 78)
                 self.feature_extractor.cleanup_old_flows()
                 features, flow_key = self.feature_extractor.extract_features(packet)
                 self.feature_extractor.update_minmax(features)
@@ -125,86 +124,81 @@ class Detector:
                 packet_id = self.packet_storage.get_next_packet_id()
                 
                 if self.feature_extractor.is_scaling_enabled():
-                    # --- [SENSORY LAYER 1: GNN TOPOLOGY] ---
-                    edge_index_np, edge_attr_np,node_anomaly = self.feature_extractor.graph_builder.get_graph_data()
-                    gnn_vec = np.zeros((1, GNN_EMBEDDING_DIM))
                     
-                    if edge_index_np is not None and gnn_model is not None:
-                        x_gnn = torch.zeros((self.feature_extractor.graph_builder.id_counter, GNN_IN_CHANNELS))
-                        x_gnn.index_add_(0, torch.tensor(edge_index_np[0], dtype=torch.long), 
-                                         torch.tensor(edge_attr_np[:, :GNN_IN_CHANNELS], dtype=torch.float))
-                        
-                        with torch.no_grad():
-                            z = gnn_model(x_gnn, torch.tensor(edge_index_np, dtype=torch.long))
-                            src_id = self.feature_extractor.graph_builder.ip_to_id.get(packet_info['src_ip'])
-                            if src_id is not None:
-                                gnn_vec = z[src_id].cpu().numpy().reshape(1, GNN_EMBEDDING_DIM)
-
-                    # --- [SENSORY LAYER 2: MAE VISUAL ANOMALY] ---
-                    mae_err = 0.0
-                    if mae_model is not None:
-                        with torch.no_grad():
-                            feat_tensor = torch.tensor(scaled_features, dtype=torch.float)
-                            recon, original = mae_model(feat_tensor, mask_ratio=MAE_MASK_RATIO)
-                            mae_err = torch.mean((recon - original)**2).item()
-
-                    # --- [FEATURE FUSION: 78 + 16 + 1 = 95] ---
-                    # Defining it early here ensures correct scope for handlers
-                    enhanced_features = np.hstack([scaled_features, gnn_vec, [[mae_err]]])
-                    # print(f"DEBUG: Raw GNN Vec Mean: {np.mean(gnn_vec):.4f}")
-                    raw_gnn_val = float(np.mean(np.abs(gnn_vec)))
-
-                    # LOG-NORMALIZATION: log1p(x) handles the explosion gracefully.
-                    # This maps: 
-                    # 100 -> ~0.46 (46%)
-                    # 1,000 -> ~0.69 (69%)
-                    # 10,000 -> ~0.92 (92%)
-                    # 32,000 -> ~0.99 (99%)
-                    normalized_gnn = float(np.tanh(np.log1p(raw_gnn_val) / 10.0))
-
-                    # 1. Update graph_builder with anomaly
-                   
-                    if self.feature_extractor.graph_builder is not None:
-                        self.feature_extractor.graph_builder.add_packet(
-                            packet_info=packet_info,
-                            features=scaled_features[0],  # 78‑dim
-                            gnn_anomaly=normalized_gnn,
-                            ae_mse=mse if 'mse' in locals() else 0.0,
-                            mae_err=mae_err,
-                        )
-
-
-                    extra_metrics = {
-                        "gnn_anomaly": normalized_gnn,
-                        "mae_anomaly": mae_err
-                    }
-
-                    # --- [ENSEMBLE CLASSIFICATION] ---
-                    cnn_prob = self.model_loader.get_main_model().predict(scaled_features, verbose=0)[0][0]
-                   
-                    rf_prob = self.model_loader.get_rf_model().predict_proba(enhanced_features)[0][1]  # Attack class
-                    xgb_prob = self.model_loader.get_xgb_model().predict_proba(enhanced_features)[0][1]  # Attack class
-
+                    # --- [STAGE 1: THE FAST GUARDS (ENSEMBLE)] ---
+                    # We ONLY use the 78 scaled_features here. 
+                    # OPTIMIZATION: model(x, training=False) is vastly faster than model.predict(x)
+                    main_model = self.model_loader.get_main_model()
+                    cnn_prob = float(main_model(scaled_features, training=False)[0][0])
+                    
+                    # NOTE: Retrain RF and XGB on the 78 features for this to work!
+                    rf_prob = self.model_loader.get_rf_model().predict_proba(scaled_features)[0][1] 
+                    xgb_prob = self.model_loader.get_xgb_model().predict_proba(scaled_features)[0][1] 
 
                     ensemble_prob = max(cnn_prob, rf_prob, xgb_prob)
-                    
-                    # if packet_id % 50 == 0:
-                    #     print(f"[SENSE] ID:{packet_id} | MAE:{mae_err:.4f} | ENSEMBLE:{ensemble_prob:.2f}")
 
                     if ensemble_prob > 0.40:
-                        # Passing enhanced_features (95-dim) to XAI queue
-                        self._handle_known_attack(packet, packet_id, enhanced_features, ensemble_prob, packet_info, features, extra_metrics)
+                        # INSTANT CATCH: Known attack detected! Skip all heavy PyTorch AI.
+                        extra_metrics = {"gnn_anomaly": 1.0, "mae_anomaly": 1.0}
+                        # We pass scaled_features (78) instead of enhanced_features (95)
+                        self._handle_known_attack(packet, packet_id, scaled_features, ensemble_prob, packet_info, features, extra_metrics)
+                        
+                        # Keep the graph updated with the attack, but bypass heavy GNN inference
+                        if self.feature_extractor.graph_builder is not None:
+                            self.feature_extractor.graph_builder.add_packet(
+                                packet_info=packet_info, features=scaled_features[0],
+                                gnn_anomaly=1.0, ae_mse=1.0, mae_err=1.0
+                            )
                     else:
-                        # Final Zero-Day Check
-                        reconstruction = self.model_loader.get_autoencoder_model().predict(scaled_features, verbose=0)
+                        # --- [STAGE 2: THE DEEP INTERROGATION (ZERO-DAY)] ---
+                        # The fast guards think it's normal. NOW we run the heavy AI.
+                        
+                        # [SENSORY LAYER 1: GNN]
+                        gnn_vec = np.zeros((1, GNN_EMBEDDING_DIM))
+                        normalized_gnn = 0.0
+                        edge_index_np, edge_attr_np, node_anomaly = self.feature_extractor.graph_builder.get_graph_data()
+                        
+                        if edge_index_np is not None and gnn_model is not None:
+                            x_gnn = torch.zeros((self.feature_extractor.graph_builder.id_counter, GNN_IN_CHANNELS))
+                            x_gnn.index_add_(0, torch.tensor(edge_index_np[0], dtype=torch.long), 
+                                             torch.tensor(edge_attr_np[:, :GNN_IN_CHANNELS], dtype=torch.float))
+                            with torch.no_grad():
+                                z = gnn_model(x_gnn, torch.tensor(edge_index_np, dtype=torch.long))
+                                src_id = self.feature_extractor.graph_builder.ip_to_id.get(packet_info['src_ip'])
+                                if src_id is not None:
+                                    gnn_vec = z[src_id].cpu().numpy().reshape(1, GNN_EMBEDDING_DIM)
+                                    raw_gnn_val = float(np.mean(np.abs(gnn_vec)))
+                                    normalized_gnn = float(np.tanh(np.log1p(raw_gnn_val) / 10.0))
+
+                        # [SENSORY LAYER 2: MAE]
+                        mae_err = 0.0
+                        if mae_model is not None:
+                            with torch.no_grad():
+                                feat_tensor = torch.tensor(scaled_features, dtype=torch.float)
+                                recon, original = mae_model(feat_tensor, mask_ratio=MAE_MASK_RATIO)
+                                mae_err = torch.mean((recon - original)**2).item()
+
+                        # [SENSORY LAYER 3: DEEP AE]
+                        autoencoder = self.model_loader.get_autoencoder_model()
+                        reconstruction = autoencoder(scaled_features, training=False).numpy()
                         mse = np.mean(np.power(scaled_features - reconstruction, 2))
+                        
                         self.feature_extractor.add_reconstruction_error(mse)
                         threshold = self.feature_extractor.compute_dynamic_threshold()
                         
+                        extra_metrics = {"gnn_anomaly": normalized_gnn, "mae_anomaly": mae_err}
+                        
                         if mse > threshold or mae_err > 0.15:
-                            self._handle_zero_day(packet, packet_id, enhanced_features, mse, packet_info, features, extra_metrics)
+                            self._handle_zero_day(packet, packet_id, scaled_features, mse, packet_info, features, extra_metrics)
                         else:
                             self._handle_normal(packet, packet_id, packet_info, features, extra_metrics)
+
+                        # Update Graph with actual calculated values
+                        if self.feature_extractor.graph_builder is not None:
+                            self.feature_extractor.graph_builder.add_packet(
+                                packet_info=packet_info, features=scaled_features[0],
+                                gnn_anomaly=normalized_gnn, ae_mse=mse, mae_err=mae_err
+                            )
                 else:
                     self._handle_normal(packet, packet_id, packet_info, features, {})
                 
@@ -214,8 +208,7 @@ class Detector:
                 traceback.print_exc()
 
     def _xai_worker(self):
-        """
-        """
+        """Main XAI loop for 78-feature fast guards"""
         print("[*] XAI worker started")
         target_model = self.model_loader.get_xgb_model()
         
@@ -231,9 +224,8 @@ class Detector:
                             self.xai_explainer.background_data.clear()
                             for sample in bg_samples_unscaled:
                                 scaled_78 = self.feature_extractor.scale_features(sample)
-                                # Pad to 95 dimensions for the Hybrid Ensemble Explainer
-                                enhanced_bg = np.hstack([scaled_78, np.zeros((1, 17))]) 
-                                self.xai_explainer.background_data.append(enhanced_bg.flatten())
+                                # THE FIX: No more padding. Just append the raw 78 features!
+                                self.xai_explainer.background_data.append(scaled_78.flatten())
                         
                         self.xai_explainer.initialize_shap(
                             target_model.predict_proba, 
@@ -241,9 +233,8 @@ class Detector:
                         )
 
                 # 2. GENERATE EXPLANATION
-                # Generate robust SHAP-based factors for the 95-feature vector
                 explanation = self.xai_explainer.generate_explanation(
-                    features=task['features'], # The 95-dim enhanced vector
+                    features=task['features'], # This is now strictly 78 dims
                     model_predict_func=target_model.predict_proba,
                     confidence=task['confidence'],
                     packet_info=task['packet_info'],
@@ -257,9 +248,7 @@ class Detector:
                 if 'extra_metrics' in task: 
                     explanation.update(task['extra_metrics'])
 
-                # 3. THE CRITICAL FIX: METADATA PRESERVATION
-                # Call the specialized update method that ONLY touches status/expl columns.
-                # This ensures src_ip, dst_ip, and protocol are NEVER modified here.
+                # 3. METADATA PRESERVATION
                 self.packet_storage.update_packet_xai_results(
                     packet_id=task['packet_id'],
                     explanation=explanation,

@@ -11,18 +11,18 @@ from datetime import datetime
 from config import XAI_DIR, USE_PROPER_XAI
 
 class XAIExplainer:
-    """Hybrid XAI System: Explains 95-feature Ensemble (Raw + GNN + MAE)"""
+    """Standardized XAI System: Explains the 78-feature Fast Guards"""
     
     def __init__(self):
         self.background_data = deque(maxlen=100)
         self.shap_explainer = None
         self.initialized = False
         self.lock = threading.Lock()
-        # Load the base 78 feature names and append the 17 new sensory features
-        self.feature_names = self._load_extended_feature_names()
+        # ONLY load the base 78 feature names
+        self.feature_names = self._load_feature_names()
     
-    def _load_extended_feature_names(self):
-        """Loads 78 base features + 16 GNN features + 1 MAE feature = 95 Total"""
+    def _load_feature_names(self):
+        """Loads exactly 78 base features"""
         current_dir = os.path.dirname(os.path.abspath(__file__))
         project_root = os.path.dirname(current_dir)
         xai_folder = os.path.join(project_root, "XAI")
@@ -38,21 +38,16 @@ class XAIExplainer:
         if len(base_names) != 78:
             base_names = [f"Raw_Feature_{i}" for i in range(78)]
             
-        # POINT 3 ALIGNMENT: Append Sensory Feature Names
-        gnn_names = [f"GNN_Context_{i}" for i in range(16)]
-        mae_name = ["MAE_Visual_Anomaly_Score"]
-        
-        return base_names + gnn_names + mae_name
+        return base_names
 
     def initialize_shap(self, model_predict_func, num_samples=20):
-        """Initialize SHAP for the 95-dimensional input space"""
+        """Initialize SHAP for the 78-dimensional input space"""
         with self.lock:
             if self.initialized: return True
             try:
                 if len(self.background_data) < num_samples: return False
                 
                 background_array = np.array(list(self.background_data))
-                # Summarize 95-dim background data
                 bg_summary = shap.kmeans(background_array, min(num_samples, len(background_array)))
                 
                 self.shap_explainer = shap.KernelExplainer(
@@ -60,7 +55,7 @@ class XAIExplainer:
                     data=bg_summary
                 )
                 self.initialized = True
-                print(f"[XAI] ✅ SHAP initialized for 95-feature Hybrid Ensemble")
+                print(f"[XAI] ✅ SHAP initialized for 78-feature Cascade Architecture")
                 return True
             except Exception as e:
                 print(f"[!] SHAP Init Failed: {e}")
@@ -68,39 +63,38 @@ class XAIExplainer:
     
     
     def generate_explanation(self, features, model_predict_func, confidence, packet_info, attack_type="Attack"):
-        """Robust explanation generator for 95-feature fusion."""
+        """Robust explanation generator for 78-feature data."""
         try:
             if not self.initialized:
                 if not self.initialize_shap(model_predict_func):
                     return self._generate_fallback_explanation(features, confidence, packet_info, attack_type)
             
-            # features is (1, 95)
+            # features is (1, 78)
             shap_values = self.shap_explainer.shap_values(features.reshape(1, -1), nsamples=50, silent=True)
             
-            # FIX: Robust extraction without intermediate target_array variable
             if isinstance(shap_values, list):
-                # For binary output: index 1 is positive class, fallback to 0
                 shap_vals = (shap_values[1] if len(shap_values) > 1 else shap_values[0]).flatten()
             else:
                 shap_vals = shap_values.flatten()
             
-            # Strictly slice to 95 and proceed
-            shap_vals = shap_vals[:95] 
-            top_features = self._get_top_features(shap_vals, features.flatten()[:95])
+            # Strictly slice to 78
+            shap_vals = shap_vals[:78] 
+            top_features = self._get_top_features(shap_vals, features.flatten()[:78])
+            
+            # Dynamic descriptions based on attack type
+            is_zero_day = (attack_type == "zero_day")
+            desc = "Deep structural analysis flagged a potential unknown anomaly. Review the 9x9 grid." if is_zero_day else "Fast Ensemble guards caught a known attack. Review the SHAP feature breakdown below."
             
             return {
-                "type": "HYBRID_ENSEMBLE_XAI",
+                "type": "XAI_EXPLANATION",
                 "title": f"🚨 {attack_type.replace('_', ' ').title()} Detected",
-                "description": "Deep feature analysis complete. Review the 9x9 grid and feature bars for structural proof.",
-                "risk_level": "CRITICAL" if attack_type == "zero_day" else "HIGH",
+                "description": desc,
+                "risk_level": "CRITICAL" if is_zero_day else "HIGH",
                 "confidence": f"{confidence:.1%}",
                 "top_contributing_factors": top_features,
-                "sensory_analysis": {
-                    "topological_shift": "Detected" if float(np.abs(np.sum(shap_vals[78:94]))) > 0.05 else "Stable",
-                    "visual_anomaly": "Detected" if float(shap_vals[94]) > 0.05 else "Stable"
-                },
                 "recommended_actions": self._get_recommended_actions(attack_type),
-                "timestamp": datetime.now().isoformat()
+                "timestamp": datetime.now().isoformat(),
+                "attack_type": attack_type # Passing this to Flutter!
             }
         except Exception as e:
             print(f"[!] XAI Final Exception: {e}")
@@ -110,8 +104,6 @@ class XAIExplainer:
         contributions = []
         for i, contrib in enumerate(shap_values):
             name = self.feature_names[i] if i < len(self.feature_names) else f"Feature_{i}"
-            
-            # --- FIX: Convert contrib to a float to avoid array ambiguity ---
             c_val = float(contrib)
             contributions.append({
                 "factor": name,
@@ -128,4 +120,4 @@ class XAIExplainer:
         return ["Block Source IP", "Rate-limit Port", "Update Firewall Rules"]
 
     def _generate_fallback_explanation(self, features, confidence, packet_info, attack_type):
-        return {"title": "Detection Alert", "risk_level": "HIGH", "confidence": f"{confidence:.1%}"}
+        return {"title": "Detection Alert", "risk_level": "HIGH", "confidence": f"{confidence:.1%}", "attack_type": attack_type}

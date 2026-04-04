@@ -74,6 +74,7 @@ class ModelLoader:
 
             print(f"[*] Loading Random Forest: {os.path.basename(RF_MODEL_ABS_PATH)}...")
             self._models["rf"] = joblib.load(RF_MODEL_ABS_PATH)
+            self._models["rf"].verbose = 0
 
             print(f"[*] Loading XGBoost: {os.path.basename(XGB_MODEL_ABS_PATH)}...")
             self._models["xgb"] = joblib.load(XGB_MODEL_ABS_PATH)
@@ -96,9 +97,9 @@ class ModelLoader:
             self._models["cnn"].predict(dummy_78, verbose=0)
             self._models["ae"].predict(dummy_78, verbose=0)
 
-            dummy_95 = np.zeros((1, 95), dtype=np.float32)
-            self._models["rf"].predict_proba(dummy_95)
-            self._models["xgb"].predict_proba(dummy_95)
+            dummy_78 = np.zeros((1, 78), dtype=np.float32)
+            self._models["rf"].predict_proba(dummy_78)
+            self._models["xgb"].predict_proba(dummy_78)
 
             print("[+] Warmup complete (78 and 95-dim paths verified).")
             return True

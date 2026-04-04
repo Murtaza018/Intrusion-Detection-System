@@ -4,6 +4,7 @@ import 'package:fl_chart/fl_chart.dart';
 import 'package:provider/provider.dart';
 import '../providers/ids_provider.dart';
 import '../providers/ids_api_client.dart';
+import 'dart:async';
 
 class AlertHistoryScreen extends StatefulWidget {
   const AlertHistoryScreen({Key? key}) : super(key: key);
@@ -35,6 +36,8 @@ class _AlertHistoryScreenState extends State<AlertHistoryScreen>
   static const _orange = Color(0xFFFF6D00);
   static const _red = Color(0xFFFF1744);
 
+  Timer? _refreshTimer;
+
   @override
   void initState() {
     super.initState();
@@ -47,35 +50,45 @@ class _AlertHistoryScreenState extends State<AlertHistoryScreen>
       _client = _provider.apiClient;
       _fetchHistory();
     });
+    _refreshTimer = Timer.periodic(const Duration(seconds: 10), (_) {
+      _fetchHistory(isSilent: true);
+    });
   }
 
   @override
   void dispose() {
+    _refreshTimer?.cancel();
     _fadeCtrl.dispose();
     super.dispose();
   }
 
   // ── Data fetching ─────────────────────────────────────────────────────────
 
-  Future<void> _fetchHistory() async {
-    setState(() {
-      _loading = true;
-      _error = null;
-    });
+  // Add the isSilent parameter, defaulting to false
+  Future<void> _fetchHistory({bool isSilent = false}) async {
+    // Only show the loading screen if it is a manual action (like changing windows)
+    if (!isSilent) {
+      setState(() {
+        _loading = true;
+        _error = null;
+      });
+    }
+
     try {
       final data = await _client.fetchHistory(
         window: _selectedWindow,
-        limit: 10000,
+        limit: 50000, // Matching the larger limit we set in the Python backend
       );
-      // FIX: fetchHistory returns null when _secureParseInIsolate sets
-      // success=false (signature verification failure) even though the payload
-      // is valid. We fall back to re-fetching raw payload here.
-      // Once signature verification is fixed on the backend, remove this block.
+
       setState(() {
         _historyData = data ?? {};
-        _loading = false;
+        _loading = false; // Always clear the loading state once data arrives
       });
-      _fadeCtrl.forward(from: 0);
+
+      // Only restart the fade animation if it was a hard manual refresh
+      if (!isSilent) {
+        _fadeCtrl.forward(from: 0);
+      }
     } catch (e) {
       debugPrint('History fetch error: $e');
       setState(() {

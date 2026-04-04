@@ -576,31 +576,156 @@ class APIServer:
         # inside class APIServer
 # ── 6. Historical Alert Analytics ──────────────────────────────────
 
+        # @self.app.route("/api/history", methods=['GET'])
+        # @self._require_api_key
+        # def get_alert_history():
+        #     try:
+        #         window = request.args.get('window', '24h', type=str)
+        #         limit  = request.args.get('limit',  10_000, type=int)
+
+        #         all_packets = self.packet_storage.get_packets(limit=limit, status_filter=None)
+
+        #         BUCKET = 3600  # 1‑hour bucket
+        #         by_time = {}
+        #         by_type = {}
+        #         total_anomaly = 0.0
+        #         count_anomaly = 0
+
+        #         for p in all_packets:
+        #             status = p.get("status", "unknown")
+        #             expl   = p.get("explanation", {}) or {}
+
+        #             mae = float(expl.get("mae_anomaly", 0.0))
+        #             if 0.0 < mae < 1.0:
+        #                 total_anomaly += mae
+        #                 count_anomaly += 1
+
+        #             # 1. your three labels: normal, attack, zero_day
+        #             if status == "normal":
+        #                 label = "normal"
+        #             elif status == "known_attack":
+        #                 label = "attack"
+        #             elif status == "zero_day":
+        #                 label = "zero_day"
+        #             else:
+        #                 label = "unknown"
+
+        #             by_type[label] = by_type.get(label, 0) + 1
+
+        #             # 2. use _ts_to_epoch with your ISO timestamp field
+        #             ts = _ts_to_epoch(p)  # <-- from above
+        #             if ts == 0:
+        #                 continue
+        #             bucket = ts - (ts % BUCKET)
+
+        #             by_time[bucket] = by_time.get(bucket, 0) + 1
+
+        #         # 3. time series
+        #         sorted_time = sorted(by_time.items())
+        #         alerts_volume = [
+        #             {"timestamp": k, "count": v}
+        #             for k, v in sorted_time
+        #         ]
+
+        #         by_type_items = [
+        #             {"label": k, "count": v}
+        #             for k, v in by_type.items()
+        #         ]
+
+        #         avg_anomaly = (total_anomaly / count_anomaly) if count_anomaly else 0.0
+
+        #         payload = {
+        #             "window": window,
+        #             "alerts_volume": alerts_volume,
+        #             "by_type": by_type_items,
+        #             "performance": {
+        #                 "avg_anomaly": round(avg_anomaly, 4),
+        #                 "total_alerts": len(by_time),
+        #                 "total_packets": len(all_packets),
+        #                 "detection_rate": round(
+        #                     sum(by_type.get(l, 0) for l in ["attack", "zero_day"]) / max(len(all_packets), 1),
+        #                     4
+        #                 ),
+        #                 "fp_estimate": 0.0,
+        #             }
+        #         }
+        #         return self._secure_response(payload)
+
+        #     except Exception as e:
+        #         traceback.print_exc()
+        #         return self._secure_response({"error": str(e)}, 500)   
+
+
         @self.app.route("/api/history", methods=['GET'])
         @self._require_api_key
         def get_alert_history():
             try:
+                # 1. We increase the default limit to catch more traffic history
                 window = request.args.get('window', '24h', type=str)
-                limit  = request.args.get('limit',  10_000, type=int)
+                limit  = request.args.get('limit',  50_000, type=int)
 
                 all_packets = self.packet_storage.get_packets(limit=limit, status_filter=None)
+                
+                if not all_packets:
+                    return self._secure_response({"alerts_volume": [], "by_type": [], "performance": {}})
 
-                BUCKET = 3600  # 1‑hour bucket
+                cutoff_seconds = 86400
+                if window == '1h':
+                    cutoff_seconds = 3600
+                elif window == '24h':
+                    cutoff_seconds = 86400
+                elif window == '7d':
+                    cutoff_seconds = 86400 * 7
+                elif window == '30d':
+                    cutoff_seconds = 86400 * 30
+
+                # --- THE FIX: Anchor time to the newest packet ---
+                # This guarantees accuracy even if timezones drift or you replay old PCAPs
+                latest_ts = 0
+                for p in all_packets:
+                    ts = _ts_to_epoch(p)
+                    if ts > latest_ts:
+                        latest_ts = ts
+                
+                start_epoch = latest_ts - cutoff_seconds
+
+                if window == '1h':
+                    BUCKET = 300       
+                elif window in ['7d', '30d']:
+                    BUCKET = 86400     
+                else:
+                    BUCKET = 3600      
+
                 by_time = {}
                 by_type = {}
                 total_anomaly = 0.0
                 count_anomaly = 0
+                valid_packets_count = 0
+
+                total_attack_confidence = 0.0
+                attack_count = 0
 
                 for p in all_packets:
+                    ts = _ts_to_epoch(p)
+                    if ts == 0 or ts < start_epoch:
+                        continue
+
+                    valid_packets_count += 1
+                    
                     status = p.get("status", "unknown")
                     expl   = p.get("explanation", {}) or {}
+
+                    conf = float(p.get("confidence", 0.85))
+
+                    if status in ["known_attack", "zero_day"]:
+                        total_attack_confidence += conf
+                        attack_count += 1
 
                     mae = float(expl.get("mae_anomaly", 0.0))
                     if 0.0 < mae < 1.0:
                         total_anomaly += mae
                         count_anomaly += 1
 
-                    # 1. your three labels: normal, attack, zero_day
                     if status == "normal":
                         label = "normal"
                     elif status == "known_attack":
@@ -611,28 +736,22 @@ class APIServer:
                         label = "unknown"
 
                     by_type[label] = by_type.get(label, 0) + 1
-
-                    # 2. use _ts_to_epoch with your ISO timestamp field
-                    ts = _ts_to_epoch(p)  # <-- from above
-                    if ts == 0:
-                        continue
                     bucket = ts - (ts % BUCKET)
-
                     by_time[bucket] = by_time.get(bucket, 0) + 1
 
-                # 3. time series
                 sorted_time = sorted(by_time.items())
-                alerts_volume = [
-                    {"timestamp": k, "count": v}
-                    for k, v in sorted_time
-                ]
-
-                by_type_items = [
-                    {"label": k, "count": v}
-                    for k, v in by_type.items()
-                ]
+                alerts_volume = [{"timestamp": k, "count": v} for k, v in sorted_time]
+                by_type_items = [{"label": k, "count": v} for k, v in by_type.items()]
 
                 avg_anomaly = (total_anomaly / count_anomaly) if count_anomaly else 0.0
+
+                # 1. Calculate the real total of malicious alerts first
+                real_total_alerts = sum(by_type.get(l, 0) for l in ["attack", "zero_day"])
+
+                fp_estimate = 0.0
+                if attack_count > 0:
+                    avg_confidence = total_attack_confidence / attack_count
+                    fp_estimate = 1.0 - avg_confidence  # If 80% confident, 20% FP chance
 
                 payload = {
                     "window": window,
@@ -640,22 +759,23 @@ class APIServer:
                     "by_type": by_type_items,
                     "performance": {
                         "avg_anomaly": round(avg_anomaly, 4),
-                        "total_alerts": len(by_time),
-                        "total_packets": len(all_packets),
+                        
+                        # 2. FIX: Use the actual count instead of len(by_time)
+                        "total_alerts": real_total_alerts, 
+                        
+                        "total_packets": valid_packets_count,
                         "detection_rate": round(
-                            sum(by_type.get(l, 0) for l in ["attack", "zero_day"]) / max(len(all_packets), 1),
-                            4
+                            real_total_alerts / max(valid_packets_count, 1), 4
                         ),
-                        "fp_estimate": 0.0,
+                        "fp_estimate": round(fp_estimate, 4),
                     }
                 }
                 return self._secure_response(payload)
 
             except Exception as e:
                 traceback.print_exc()
-                return self._secure_response({"error": str(e)}, 500)   
-
-
+                return self._secure_response({"error": str(e)}, 500)
+            
     def _get_require_api_key_decorator(self):
         return self._require_api_key
 

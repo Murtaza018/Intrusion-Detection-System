@@ -110,47 +110,6 @@ class _MaeVisualizerDialogState extends State<MaeVisualizerDialog> {
     });
   }
 
-  @override
-  Widget build(BuildContext context) {
-    final factors =
-        widget.packet.explanation?['top_contributing_factors'] ?? [];
-    List<double> gridData = List.filled(81, 0.0);
-    for (int i = 0; i < factors.length && i < 81; i++) {
-      gridData[i] =
-          (double.tryParse(factors[i]['observed_value']?.toString() ?? '0.0') ??
-                  0.0)
-              .clamp(0.0, 1.0);
-    }
-
-    return AlertDialog(
-      backgroundColor: const Color(0xFF0D1117),
-      insetPadding: const EdgeInsets.all(20),
-      shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(12),
-          side: const BorderSide(color: Colors.white10)),
-      content: SizedBox(
-        width: 800, // Widened for Dual-Panel comparison
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            _buildHeader(),
-            const SizedBox(height: 24),
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                _buildGrid(gridData),
-                const SizedBox(width: 24),
-                Expanded(child: _buildDualInspector(gridData)),
-              ],
-            ),
-            const SizedBox(height: 24),
-            _buildFooter(),
-          ],
-        ),
-      ),
-    );
-  }
-
   Widget _buildGrid(List<double> gridData) {
     return Container(
       width: 300,
@@ -270,21 +229,69 @@ class _MaeVisualizerDialogState extends State<MaeVisualizerDialog> {
     );
   }
 
+  @override
+  Widget build(BuildContext context) {
+    // 1. Grab the full 78-feature array we just added to the Python backend!
+    final List<dynamic> rawFeatures =
+        widget.packet.explanation?['raw_features'] ?? [];
+
+    // 2. Prepare an 81-slot grid (78 features + 3 blank padding squares at the end)
+    List<double> gridData = List.filled(81, 0.0);
+
+    // 3. Fill the grid with the actual raw traffic data
+    for (int i = 0; i < rawFeatures.length && i < 81; i++) {
+      gridData[i] =
+          (double.tryParse(rawFeatures[i]?.toString() ?? '0.0') ?? 0.0)
+              .clamp(0.0, 1.0);
+    }
+
+    return AlertDialog(
+      backgroundColor: const Color(0xFF0D1117),
+      insetPadding: const EdgeInsets.all(20),
+      shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+          side: const BorderSide(color: Colors.white10)),
+      content: SizedBox(
+        width: 800,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _buildHeader(),
+            const SizedBox(height: 24),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _buildGrid(gridData),
+                const SizedBox(width: 24),
+                Expanded(child: _buildDualInspector(gridData)),
+              ],
+            ),
+            const SizedBox(height: 24),
+            _buildFooter(),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _buildHeader() {
     return Row(
       children: [
-        const Icon(Icons.compare_arrows_rounded,
-            color: Color(0xFF00E5FF), size: 20),
+        const Icon(Icons.blur_on_rounded,
+            color: Color(0xFF00E5FF), size: 24), // Changed Icon
         const SizedBox(width: 12),
         Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: const [
-            Text("COMPARATIVE STRUCTURAL ANALYSIS",
+            // Updated Titles to reflect the new Raw Feature reality
+            Text("RAW FEATURE HEATMAP",
                 style: TextStyle(
                     color: Colors.white,
                     fontSize: 16,
-                    fontWeight: FontWeight.bold)),
-            Text("Select two features to cross-reference anomaly distribution",
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: 1)),
+            Text(
+                "Select two network features to cross-reference their scaled intensity",
                 style: TextStyle(color: Colors.white24, fontSize: 10)),
           ],
         ),

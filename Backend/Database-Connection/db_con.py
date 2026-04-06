@@ -72,6 +72,22 @@ def setup_database():
                 explanation TEXT
             );
         """)
+
+        # Create DMZ IPs Table
+        print("[*] Creating 'dmz_ips' table...")
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS dmz_ips (
+                id SERIAL PRIMARY KEY,
+                ip_address VARCHAR(50) UNIQUE NOT NULL
+            );
+        """)
+        
+        # Insert default values if table is empty
+        cursor.execute("SELECT COUNT(*) FROM dmz_ips;")
+        if cursor.fetchone()[0] == 0:
+            default_ips = ['172.16.', '192.168.1.10', '192.168.1.11', '10.0.0.5']
+            for dip in default_ips:
+                cursor.execute("INSERT INTO dmz_ips (ip_address) VALUES (%s) ON CONFLICT DO NOTHING", (dip,))
         
         # 5. Create Indices (For Speed)
         print("[*] Creating indices...")

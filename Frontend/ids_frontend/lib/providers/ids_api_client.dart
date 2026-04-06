@@ -214,6 +214,56 @@ class IdsApiClient {
       return null;
     }
   }
+
+  // ---------------------------------------------------------------------------
+  // DMZ Settings
+  // ---------------------------------------------------------------------------
+
+  Future<List<String>> fetchDmzIps() async {
+    try {
+      final res = await http.get(
+        Uri.parse('${IdsConfig.baseUrl}/api/settings/dmz_ips'),
+        headers: IdsConfig.headers,
+      );
+      final result = await _secureParseInIsolate(res.bodyBytes);
+      if (res.statusCode == 200 && result['success'] == true) {
+        return List<String>.from(result['payload']['dmz_ips'] ?? []);
+      }
+    } catch (e) {
+      debugPrint('DMZ fetch error: $e');
+    }
+    return [];
+  }
+
+  Future<bool> addDmzIp(String ipAddress) async {
+    try {
+      final body = jsonEncode({'ip_address': ipAddress});
+      final res = await http.post(
+        Uri.parse('${IdsConfig.baseUrl}/api/settings/dmz_ips'),
+        headers: IdsConfig.headers,
+        body: body,
+      );
+      return res.statusCode == 200 && await _verifyInIsolate(res.bodyBytes);
+    } catch (e) {
+      debugPrint('DMZ add error: $e');
+      return false;
+    }
+  }
+
+  Future<bool> removeDmzIp(String ipAddress) async {
+    try {
+      final body = jsonEncode({'ip_address': ipAddress});
+      final res = await http.delete(
+        Uri.parse('${IdsConfig.baseUrl}/api/settings/dmz_ips'),
+        headers: IdsConfig.headers,
+        body: body,
+      );
+      return res.statusCode == 200 && await _verifyInIsolate(res.bodyBytes);
+    } catch (e) {
+      debugPrint('DMZ remove error: $e');
+      return false;
+    }
+  }
   // ---------------------------------------------------------------------------
   // Isolate helpers — all ECC math runs off the UI thread
   // ---------------------------------------------------------------------------

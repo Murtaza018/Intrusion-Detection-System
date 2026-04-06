@@ -92,6 +92,7 @@ class XAIExplainer:
                 "risk_level": "CRITICAL" if is_zero_day else "HIGH",
                 "confidence": f"{confidence:.1%}",
                 "top_contributing_factors": top_features,
+                "raw_features": features.flatten()[:78].tolist(),
                 "recommended_actions": self._get_recommended_actions(attack_type),
                 "timestamp": datetime.now().isoformat(),
                 "attack_type": attack_type # Passing this to Flutter!

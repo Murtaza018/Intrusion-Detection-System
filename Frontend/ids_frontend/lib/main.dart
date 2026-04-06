@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:ids_monitor/screens/report_summary_screen.dart';
+import 'package:ids_monitor/screens/settings_screen.dart';
 import 'package:provider/provider.dart';
 import './screens/dashboard_screen.dart';
 import './screens/graph_screen.dart';
@@ -74,6 +75,7 @@ class _BottomNavRootState extends State<_BottomNavRoot> {
     AdaptationScreen(),
     AlertHistoryScreen(),
     ReportSummaryScreen(),
+    SettingsScreen(),
   ];
 
   @override
@@ -113,6 +115,11 @@ class _BottomNavRootState extends State<_BottomNavRoot> {
             // <-- new item
             icon: Icon(Icons.report),
             label: "Summary",
+          ),
+          BottomNavigationBarItem(
+            // <-- new item
+            icon: Icon(Icons.settings),
+            label: "Settings",
           ),
         ],
       ),

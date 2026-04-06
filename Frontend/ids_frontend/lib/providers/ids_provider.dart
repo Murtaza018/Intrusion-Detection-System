@@ -107,6 +107,31 @@ class IdsProvider with ChangeNotifier {
     await _api.stopPipeline();
   }
 
+  List<String> _dmzIps = [];
+  List<String> get dmzIps => _dmzIps;
+
+  Future<void> loadDmzIps() async {
+    _dmzIps = await apiClient.fetchDmzIps();
+    notifyListeners();
+  }
+
+  Future<void> addDmzIp(String ip) async {
+    if (ip.isEmpty || _dmzIps.contains(ip)) return;
+    bool success = await apiClient.addDmzIp(ip);
+    if (success) {
+      _dmzIps.add(ip);
+      notifyListeners();
+    }
+  }
+
+  Future<void> removeDmzIp(String ip) async {
+    bool success = await apiClient.removeDmzIp(ip);
+    if (success) {
+      _dmzIps.remove(ip);
+      notifyListeners();
+    }
+  }
+
   // ---------------------------------------------------------------------------
   // Continual learning
   // ---------------------------------------------------------------------------

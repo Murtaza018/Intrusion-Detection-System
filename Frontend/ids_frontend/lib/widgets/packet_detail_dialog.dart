@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/ids_provider.dart';
 import '../models/packet.dart';
+import 'mae_heat_map.dart';
 
 class PacketDetailDialog extends StatelessWidget {
   final Packet packet;
@@ -176,6 +177,38 @@ class PacketDetailDialog extends StatelessWidget {
                       if (explanation['sensory_analysis'] != null)
                         _buildSensorySmallTiles(
                             explanation['sensory_analysis']),
+
+                      // ---------------------------------------------------------
+                      // THE REAL 9x9 MAE GRID (ONLY SHOWS FOR ZERO-DAYS)
+                      // ---------------------------------------------------------
+                      if (packet.status == 'zero_day' &&
+                          explanation['sensory_analysis'] != null &&
+                          explanation['sensory_analysis']['original_grid'] !=
+                              null) ...[
+                        const SizedBox(height: 24),
+                        _sectionTitle("MAE STRUCTURAL X-RAY (ZERO-DAY)"),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                          children: [
+                            MaeHeatmapGrid(
+                              title: "Original Traffic",
+                              // Cast the JSON array to List<double>
+                              gridValues: List<double>.from(
+                                  explanation['sensory_analysis']
+                                          ['original_grid']
+                                      .map((x) => x.toDouble())),
+                            ),
+                            MaeHeatmapGrid(
+                              title: "MAE Reconstruction",
+                              gridValues: List<double>.from(
+                                  explanation['sensory_analysis']
+                                          ['reconstructed_grid']
+                                      .map((x) => x.toDouble())),
+                            ),
+                          ],
+                        ),
+                      ],
+                      // ---------------------------------------------------------
 
                       const SizedBox(height: 24),
                       if (explanation['top_contributing_factors'] != null) ...[

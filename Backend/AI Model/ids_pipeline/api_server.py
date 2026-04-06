@@ -20,8 +20,20 @@ from config import API_KEY
 from detector import Detector
 from datetime import datetime,timedelta,timezone
 
+import psycopg2
+from psycopg2.extras import RealDictCursor
+import os
 
 
+
+def get_db_connection():
+    return psycopg2.connect(
+        host=os.getenv("DB_HOST"),
+        port=os.getenv("DB_PORT"),
+        user=os.getenv("DB_USER"),
+        password=os.getenv("DB_PASSWORD"),
+        dbname=os.getenv("DB_NAME")
+    )
 
 def _ts_to_epoch(obj):
     """
@@ -127,6 +139,9 @@ class APIServer:
 
     def _register_routes(self):
 
+
+
+
         def _require_api_key(f):
             @wraps(f)
             def decorated(*args, **kwargs):
@@ -148,6 +163,43 @@ class APIServer:
                 return timedelta(weeks=1)
             else:
                 raise ValueError("Unsupported window")
+            
+
+        @self.app.route("/api/settings/dmz_ips", methods=['GET', 'POST', 'DELETE'])
+        @self._require_api_key
+        def manage_dmz_ips():
+            try:
+                conn = get_db_connection()
+                cursor = conn.cursor(cursor_factory=RealDictCursor)
+
+                if request.method == 'GET':
+                    cursor.execute("SELECT ip_address FROM dmz_ips")
+                    ips = [row['ip_address'] for row in cursor.fetchall()]
+                    return self._secure_response({"dmz_ips": ips})
+
+                elif request.method == 'POST':
+                    data = request.json
+                    ip = data.get('ip_address')
+                    if ip:
+                        cursor.execute("INSERT INTO dmz_ips (ip_address) VALUES (%s) ON CONFLICT DO NOTHING", (ip,))
+                        conn.commit()
+                    return self._secure_response({"message": f"Added {ip}"})
+
+                elif request.method == 'DELETE':
+                    data = request.json
+                    ip = data.get('ip_address')
+                    if ip:
+                        cursor.execute("DELETE FROM dmz_ips WHERE ip_address = %s", (ip,))
+                        conn.commit()
+                    return self._secure_response({"message": f"Removed {ip}"})
+
+            except Exception as e:
+                traceback.print_exc()
+                return self._secure_response({"error": str(e)}, 500)
+            finally:
+                if 'conn' in locals():
+                    cursor.close()
+                    conn.close()    
 
 
         @self.app.route("/api/report/<string:window>", methods=['GET'])
@@ -524,6 +576,13 @@ class APIServer:
                         {"error": "Detector missing get_graph_snapshot method"}, 500
                     )
 
+                conn = get_db_connection()
+                cursor = conn.cursor()
+                cursor.execute("SELECT ip_address FROM dmz_ips")
+                dmz_ips = [row[0] for row in cursor.fetchall()]
+                cursor.close()
+                conn.close()
+
                 # 1. Get snapshot
                 data = detector.get_graph_snapshot()
                 if data is None:
@@ -542,8 +601,15 @@ class APIServer:
                         else:
                             node["isGateway"] = False
                             
-                        # 2. DMZ Detection (Example: you can customize these IPs based on your dataset)
-                        if ip.startswith("172.16.") or ip in ["192.168.1.10", "192.168.1.11", "10.0.0.5"]:
+                        # 2. DMZ Detection (Dynamic mapping)
+                        is_dmz = False
+                        for dmz_ip in dmz_ips:
+                            # Subnet prefix match (e.g., '172.16.') or exact IP match
+                            if (dmz_ip.endswith('.') and ip.startswith(dmz_ip)) or ip == dmz_ip:
+                                is_dmz = True
+                                break
+                                
+                        if is_dmz:
                             node["isDmz"] = True
                             node["subnet"] = "DMZ-Zone"
                         else:

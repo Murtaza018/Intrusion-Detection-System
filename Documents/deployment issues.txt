@@ -60,3 +60,5 @@ This one is surprisingly quick because it's purely a Windows setting and a singl
 * **Update Backend:** 1 minute (pasting that adapter name into `NETWORK_INTERFACE` in your `config.py` and restarting the Python script).
 
 Since you are a student without enterprise resources, these two setups combined give you a massive "wow factor" for your presentation in barely any time at all. You can literally set this up right before a demo!
+
+#hello world

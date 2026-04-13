@@ -5,15 +5,6 @@ import '../models/node.dart';
 import '../models/edge.dart';
 
 class GraphLayoutService {
-  /// Force-directed (Fruchterman-Reingold style) layout.
-  ///
-  /// Key tuning levers:
-  ///  • [initialRadius]   — how wide the starting circle is. Larger = nodes
-  ///                        start farther apart and end up farther apart.
-  ///  • [repulsionStrength] — how hard nodes push each other away.
-  ///  • [attractionStrength] — spring constant pulling connected nodes together.
-  ///  • [minDistance]     — hard floor: no two nodes end up closer than this
-  ///                        in world-space, so zooming in always shows space.
   static GraphData applyForceDirectedLayout(
     GraphData graphData, {
     int iterations = 150,
@@ -30,8 +21,6 @@ class GraphLayoutService {
     final positions = <int, _Vec2>{};
     final velocities = <int, _Vec2>{};
 
-    // Place nodes evenly on a circle with a small random jitter so no two
-    // nodes start exactly on top of each other.
     for (int i = 0; i < n; i++) {
       final node = graphData.nodes[i];
       final angle = (i / n) * 2 * math.pi;
@@ -112,11 +101,6 @@ class GraphLayoutService {
         positions[node.id] = positions[node.id]! + vel;
       }
 
-      // ── Minimum distance enforcement ──────────────────────────────────
-      // After each integration step, push any pair of nodes that ended up
-      // closer than minDistance apart back to that minimum separation.
-      // This guarantees there is always visible space between nodes at any
-      // zoom level, preventing the "clumped blob" appearance.
       for (int i = 0; i < n; i++) {
         for (int j = i + 1; j < n; j++) {
           final id1 = graphData.nodes[i].id;

@@ -16,11 +16,6 @@ class GraphBuilder:
         return self.ip_to_id[ip]
 
     def add_packet(self, packet_info, features, ae_mse=None, mae_err=None, gnn_anomaly=None):
-        """
-        packet_info: dict with src_ip, dst_ip
-        features: 78‑dim scaled feature vector
-        ae_mse / mae_err / gnn_anomaly: optional anomaly scores
-        """
         src_id = self._get_node_id(packet_info['src_ip'])
         dst_id = self._get_node_id(packet_info['dst_ip'])
 
@@ -30,12 +25,6 @@ class GraphBuilder:
         self.packet_buffer.append((src_id, dst_id, features, float(anomaly)))
 
     def get_graph_data(self):
-        """
-        Returns:
-            edge_index: (2, N_edges)
-            edge_attr: (N_edges, N_feature_dims)
-            node_anomaly: dict {node_id: mean anomaly}
-        """
         if len(self.packet_buffer) < 10:
             return None, None, {}
 

@@ -22,7 +22,7 @@ MAE_GRID_SIZE = 9
 MAE_MASK_RATIO = 0.4
 
 # Model paths
-MAIN_MODEL_REL_PATH = os.path.join("Adversarial Attack and Defense", "cicids_spatiotemporal_model_hardened.keras")
+MAIN_MODEL_REL_PATH = os.path.join("Adversarial Attack and Defense", "cicids_spatiotemporal_model_hardened_backup.keras")
 AUTOENCODER_REL_PATH = os.path.join("Autoencoder", "cicids_autoencoder.keras")
 RF_MODEL_PATH = os.path.join("XGBoost and Random Forest","models_ensemble", "rf_model.joblib")
 XGB_MODEL_PATH = os.path.join("XGBoost and Random Forest","models_ensemble", "xgb_model.joblib")

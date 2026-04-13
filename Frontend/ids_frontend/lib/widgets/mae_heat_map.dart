@@ -1,8 +1,5 @@
 import 'package:flutter/material.dart';
 
-// ═══════════════════════════════════════════════════════════════════════════
-// MAE Heatmap Grid Widget
-// ═══════════════════════════════════════════════════════════════════════════
 class MaeHeatmapGrid extends StatelessWidget {
   final List<double> gridValues;
   final String title;

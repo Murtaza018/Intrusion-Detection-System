@@ -15,10 +15,6 @@ from config import (
 
 class Detector:
 
-    """
-    Hybrid Detection Logic: GNN + MAE + 95-feature Ensemble.
-    Fully integrated with SHAP XAI for hybrid explanations.
-    """
     
     def __init__(self, model_loader, feature_extractor, xai_explainer, packet_storage):
         self.model_loader = model_loader
@@ -125,20 +121,15 @@ class Detector:
                 
                 if self.feature_extractor.is_scaling_enabled():
                     
-                    # --- [STAGE 1: THE FAST GUARDS (ENSEMBLE)] ---
-                    # We ONLY use the 78 scaled_features here. 
-                    # OPTIMIZATION: model(x, training=False) is vastly faster than model.predict(x)
                     main_model = self.model_loader.get_main_model()
                     cnn_prob = float(main_model(scaled_features, training=False)[0][0])
                     
-                    # NOTE: Retrain RF and XGB on the 78 features for this to work!
                     rf_prob = self.model_loader.get_rf_model().predict_proba(scaled_features)[0][1] 
                     xgb_prob = self.model_loader.get_xgb_model().predict_proba(scaled_features)[0][1] 
 
                     ensemble_prob = max(cnn_prob, rf_prob, xgb_prob)
 
                     if ensemble_prob > 0.40:
-                        # INSTANT CATCH: Known attack detected! Skip all heavy PyTorch AI.
                         extra_metrics = {"gnn_anomaly": 1.0, "mae_anomaly": 1.0}
                         # We pass scaled_features (78) instead of enhanced_features (95)
                         self._handle_known_attack(packet, packet_id, scaled_features, ensemble_prob, packet_info, features, extra_metrics)
@@ -150,10 +141,7 @@ class Detector:
                                 gnn_anomaly=1.0, ae_mse=1.0, mae_err=1.0
                             )
                     else:
-                        # --- [STAGE 2: THE DEEP INTERROGATION (ZERO-DAY)] ---
-                        # The fast guards think it's normal. NOW we run the heavy AI.
                         
-                        # [SENSORY LAYER 1: GNN]
                         gnn_vec = np.zeros((1, GNN_EMBEDDING_DIM))
                         normalized_gnn = 0.0
                         edge_index_np, edge_attr_np, node_anomaly = self.feature_extractor.graph_builder.get_graph_data()
@@ -170,7 +158,7 @@ class Detector:
                                     raw_gnn_val = float(np.mean(np.abs(gnn_vec)))
                                     normalized_gnn = float(np.tanh(np.log1p(raw_gnn_val) / 10.0))
 
-                        # [SENSORY LAYER 2: MAE]
+                      
                         mae_err = 0.0
                         if mae_model is not None:
                             with torch.no_grad():
@@ -178,7 +166,7 @@ class Detector:
                                 recon, original = mae_model(feat_tensor, mask_ratio=MAE_MASK_RATIO)
                                 mae_err = torch.mean((recon - original)**2).item()
 
-                        # [SENSORY LAYER 3: DEEP AE]
+                       
                         autoencoder = self.model_loader.get_autoencoder_model()
                         reconstruction = autoencoder(scaled_features, training=False).numpy()
                         mse = np.mean(np.power(scaled_features - reconstruction, 2))
@@ -385,26 +373,7 @@ class Detector:
 
 
     def classify_features_pipeline(self, raw_features: np.ndarray, extra_info=None):
-        """
-        Run the EXACT SAME detection logic as _detection_worker on a 78‑dim feature vector.
-        raw_features: 1D array of 78 features OR shape (78,)
-        extra_info: optional dict with packet info (src_ip, dst_ip, protocol, src_port, dst_port)
-                    used for GNN context; if not provided, graph is empty.
-
-        Returns:
-            {
-                "label": "normal" | "zero_day" | "known_attack",
-                "confidence": float,
-                "scores": {
-                    "cnn_prob": float,
-                    "rf_prob": float,
-                    "xgb_prob": float,
-                    "ae_mse": float,
-                    "mae_err": float,
-                    "gnn_anomaly": float,
-                }
-            }
-        """
+       
         if raw_features.ndim == 1:
             raw_features = raw_features.reshape(1, -1)  # (1, 78)
 

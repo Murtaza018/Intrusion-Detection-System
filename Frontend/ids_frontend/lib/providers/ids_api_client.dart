@@ -1,8 +1,3 @@
-// providers/ids_api_client.dart
-//
-// HTTP wrapper for: pipeline start/stop, retrain, analyze, labels, stats.
-// All signature verification is offloaded to a compute() isolate.
-
 import 'dart:convert';
 import 'dart:typed_data';
 
@@ -14,10 +9,6 @@ import '../utils/isolate_workers.dart';
 import 'ids_config.dart';
 
 class IdsApiClient {
-  // ---------------------------------------------------------------------------
-  // Pipeline control
-  // ---------------------------------------------------------------------------
-
   Future<bool> startPipeline() async {
     try {
       final res = await http.post(
@@ -41,10 +32,6 @@ class IdsApiClient {
       debugPrint('Pipeline stop error: $e');
     }
   }
-
-  // ---------------------------------------------------------------------------
-  // Continual learning
-  // ---------------------------------------------------------------------------
 
   Future<bool> sendRetrainRequest({
     required List<Packet> ganQueue,
@@ -264,11 +251,7 @@ class IdsApiClient {
       return false;
     }
   }
-  // ---------------------------------------------------------------------------
-  // Isolate helpers — all ECC math runs off the UI thread
-  // ---------------------------------------------------------------------------
 
-  /// Verify only (bool result). Use when you don't need the payload back.
   Future<bool> _verifyInIsolate(Uint8List bodyBytes) async {
     final result = await _secureParseInIsolate(bodyBytes);
     return result['success'] == true;

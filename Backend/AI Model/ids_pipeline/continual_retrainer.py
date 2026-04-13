@@ -1,13 +1,4 @@
-"""
-continual_retrainer.py
 
-Fixes applied vs previous version:
-  1. MAE  — uses torch.save/load_state_dict instead of Keras model.save()
-  2. AE   — removed double compile; freezes encoder layers properly with
-             layer.trainable = False before the single compile
-  3. RF rollback — _update_sklearn_in_loader now maps "randomforest" → "rf"
-                   so the loader cache is actually updated on rollback
-"""
 
 import os
 import traceback

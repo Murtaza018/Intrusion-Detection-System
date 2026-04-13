@@ -1,15 +1,3 @@
-// providers/retrain_job_poller.dart
-//
-// Manages the async retrain job lifecycle on the Flutter side.
-//
-// Flow:
-//   1. sendRetrainRequest() POSTs to /api/retrain → gets back job_id immediately
-//   2. startPolling()       polls /api/retrain/status every 4 s
-//   3. stopPolling()        called when status is done / failed / rolled_back
-//   4. IdsState is updated at each poll so the UI reflects live progress
-//
-// The UI should watch: retrainJobId, retrainStatus, retrainPhase, retrainProgress
-
 import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
@@ -32,12 +20,6 @@ class RetrainJobPoller {
   final IdsState _state;
   Timer? _pollTimer;
 
-  // ------------------------------------------------------------------
-  // Submit
-  // ------------------------------------------------------------------
-
-  /// POSTs to /api/retrain. Returns the job_id on success, null on failure.
-  /// Does NOT block — the actual training runs server-side in a background thread.
   Future<String?> submitRetrainJob({
     required List<Map<String, dynamic>> ganQueue,
     required List<Map<String, dynamic>> jitterQueue,

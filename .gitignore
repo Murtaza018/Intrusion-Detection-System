@@ -37,3 +37,6 @@ dist/
 Backend/AI Model/GNN/training_data
 
 *.pth
+
+Testing
+Testing GNS3

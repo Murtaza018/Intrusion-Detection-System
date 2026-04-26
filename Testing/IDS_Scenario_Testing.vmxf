@@ -1,8 +1,0 @@
-<?xml version="1.0"?>
-<Foundry>
-<VM>
-<VMId type="string">52 97 84 62 fe c1 34 08-c4 4d cc 74 6d 4c b1 fc</VMId>
-<ClientMetaData>
-<clientMetaDataAttributes/>
-<HistoryEventList/></ClientMetaData>
-<vmxPathName type="string">IDS_Scenario_Testing.vmx</vmxPathName></VM></Foundry>

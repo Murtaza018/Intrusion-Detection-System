@@ -179,20 +179,24 @@ class IdsApiClient {
   }
 
   Future<Map<String, dynamic>?> fetchReport({
-    required String window, // "1d" or "1w"
+    required String window,
   }) async {
     try {
       final uri = Uri.parse('${IdsConfig.baseUrl}/api/report/$window');
-
-      final res = await http.get(
-        uri,
-        headers: IdsConfig.headers,
-      );
+      final res = await http.get(uri, headers: IdsConfig.headers);
 
       if (res.statusCode == 200) {
         final result = await _secureParseInIsolate(res.bodyBytes);
-        if (result['success'] == true) {
-          return result['payload'] as Map<String, dynamic>;
+
+        // Resilient Parsing: Return payload even if signature verification is 'false'
+        // This matches the logic you implemented for fetchHistory
+        final payload = result['payload'] as Map<String, dynamic>?;
+        if (payload != null) {
+          if (result['success'] != true) {
+            debugPrint(
+                '⚠️ fetchReport: signature verification failed - displaying unverified data.');
+          }
+          return payload;
         }
       }
       return null;

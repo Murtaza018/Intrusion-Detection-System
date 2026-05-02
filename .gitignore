@@ -47,3 +47,5 @@ Backend/AI Model/ids_pipeline/firebase_key.json
 Frontend/ids_frontend/lib/firebase_options.dart
 
 Frontend/ids_frontend/android/app/google-services.json
+
+Backend/AI Model/ids_pipeline/service-account.json

@@ -17,14 +17,34 @@ from detector import Detector
 from api_server import APIServer
 from pipeline_manager import PipelineManager
 
+import firebase_admin
+from firebase_admin import credentials, messaging
+
+CERT_PATH = "service-account.json" 
+
+def initialize_firebase():
+    try:
+        # 2. Check if already initialized to avoid "app already exists" error
+        if not firebase_admin._apps:
+            cred = credentials.Certificate(CERT_PATH)
+            firebase_admin.initialize_app(cred)
+            print("[+] Firebase Admin SDK initialized successfully.")
+    except Exception as e:
+        print(f"[!] Firebase Initialization Error: {e}")
+
+# 3. Call this function before starting the pipeline
+
+
 def main():
     """Main function"""
     print("\n" + "="*60)
     print("🔐 INTRUSION DETECTION SYSTEM - PRODUCTION READY")
     print("="*60)
     print(f"📁 Base Directory: {BASE_DIR}")
+
     
-    # 1. Initialize Core Components
+    # 1. Initialize Core 
+    initialize_firebase()
     model_loader = ModelLoader()
     feature_extractor = FeatureExtractor()
     xai_explainer = XAIExplainer()

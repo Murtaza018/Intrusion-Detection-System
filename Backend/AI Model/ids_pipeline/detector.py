@@ -13,8 +13,10 @@ from config import (
     GNN_EMBEDDING_DIM
 )
 
+
 import firebase_admin
 from firebase_admin import credentials, messaging
+
 
 
 class Detector:
@@ -48,7 +50,7 @@ class Detector:
                 ),
                 tokens=list(self.registered_tokens),
             )
-            response = messaging.send_multicast(message)
+            response = messaging.send_each_for_multicast(message)
             print(f"[*] FCM: Successfully sent {response.success_count} alerts.")
         except Exception as e:
             print(f"[!] FCM Notification Error: {e}")

@@ -12,6 +12,10 @@ class IdsConfig {
     'API_KEY',
     defaultValue: 'MySuperSecretKey12345!',
   );
+  static const String vapidKey = String.fromEnvironment(
+    'Vapid_Key',
+    defaultValue: '',
+  );
 
   /// ECC P-256 public key X coordinate (hex) — extracted from cert.pem
   static const String pubXHex =

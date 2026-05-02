@@ -13,6 +13,10 @@ from config import (
     GNN_EMBEDDING_DIM
 )
 
+import firebase_admin
+from firebase_admin import credentials, messaging
+
+
 class Detector:
 
     
@@ -21,6 +25,8 @@ class Detector:
         self.feature_extractor = feature_extractor
         self.xai_explainer = xai_explainer
         self.packet_storage = packet_storage
+
+        self.registered_tokens = set()
         
         self.packet_queue = queue.Queue()
         self.xai_queue = queue.Queue(maxsize=50)
@@ -29,6 +35,25 @@ class Detector:
         self.thread = None
         self.xai_thread = None
         
+    def send_push_notification(self, anomaly_type, details):
+        """Sends a notification to all registered mobile devices."""
+        if not self.registered_tokens:
+            return
+
+        try:
+            message = messaging.MulticastMessage(
+                notification=messaging.Notification(
+                    title=f"🚨 IDS Alert: {anomaly_type}!",
+                    body=details,
+                ),
+                tokens=list(self.registered_tokens),
+            )
+            response = messaging.send_multicast(message)
+            print(f"[*] FCM: Successfully sent {response.success_count} alerts.")
+        except Exception as e:
+            print(f"[!] FCM Notification Error: {e}")
+
+
     def start(self):
         """Start detection threads and RESUME unfinished XAI tasks with full metadata"""
         self.packet_queue = queue.Queue()
@@ -263,6 +288,11 @@ class Detector:
             "status": "analyzing", 
             **extra_metrics
         }
+
+        self.send_push_notification(
+            "Known Attack", 
+            f"Detected {confidence:.1%} threat from {packet_info['src_ip']} ({packet_info['protocol']})"
+        )
         
         packet_obj = self._create_packet_object(packet, packet_id, "known_attack", confidence, initial_expl, raw_features)
         self.packet_storage.add_packet(packet_obj)
@@ -284,6 +314,11 @@ class Detector:
             **extra_metrics
         }
         
+        self.send_push_notification(
+            "Zero-Day Anomaly", 
+            f"Structural deviation detected from {packet_info['src_ip']}. MSE: {error:.4f}"
+        )
+
         packet_obj = self._create_packet_object(packet, packet_id, "zero_day", error, initial_expl, raw_features)
         self.packet_storage.add_packet(packet_obj)
         

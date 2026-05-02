@@ -1,12 +1,72 @@
 // lib/screens/dashboard_screen.dart
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 import '../providers/ids_provider.dart';
 import '../widgets/packet_list.dart';
 import '../widgets/sensory_dashboard_widget.dart';
 import 'adaptation_screen.dart';
 
-class DashboardScreen extends StatelessWidget {
+class DashboardScreen extends StatefulWidget {
+  @override
+  State<DashboardScreen> createState() => _DashboardScreenState();
+}
+
+class _DashboardScreenState extends State<DashboardScreen> {
+  @override
+  void initState() {
+    super.initState();
+
+    // 3. Setup the foreground listener
+    FirebaseMessaging.onMessage.listen((RemoteMessage message) {
+      debugPrint('Got a message whilst in the foreground!');
+      if (message.notification != null) {
+        _showCyberAlert(
+            message.notification!.title ?? "IDS ALERT",
+            message.notification!.body ??
+                "Anomaly detected in traffic stream.");
+      }
+    });
+  }
+
+  // 4. Helper method to show a "Cyber" themed notification snackbar
+  void _showCyberAlert(String title, String body) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        backgroundColor: const Color(0xFF15191C),
+        behavior: SnackBarBehavior.floating,
+        margin: const EdgeInsets.all(20),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(4),
+          side: const BorderSide(color: Color(0xFF00E5FF), width: 1),
+        ),
+        content: Row(
+          children: [
+            const Icon(Icons.gpp_maybe, color: Color(0xFF00E5FF)),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(title,
+                      style: const TextStyle(
+                          color: Color(0xFF00E5FF),
+                          fontWeight: FontWeight.bold,
+                          fontSize: 12,
+                          fontFamily: 'monospace')),
+                  Text(body,
+                      style:
+                          const TextStyle(color: Colors.white70, fontSize: 10)),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final provider = Provider.of<IdsProvider>(context, listen: false);

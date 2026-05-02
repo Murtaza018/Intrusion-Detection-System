@@ -8,6 +8,8 @@ import '../models/packet.dart';
 import '../utils/isolate_workers.dart';
 import 'ids_config.dart';
 
+import 'package:firebase_messaging/firebase_messaging.dart';
+
 class IdsApiClient {
   Future<bool> startPipeline() async {
     try {
@@ -253,6 +255,53 @@ class IdsApiClient {
     } catch (e) {
       debugPrint('DMZ remove error: $e');
       return false;
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+// Push Notifications
+// ---------------------------------------------------------------------------
+
+  Future<void> setupNotifications() async {
+    try {
+      FirebaseMessaging messaging = FirebaseMessaging.instance;
+
+      // 1. Request permission (required for iOS)
+      NotificationSettings settings = await messaging.requestPermission(
+        alert: true,
+        badge: true,
+        sound: true,
+      );
+
+      if (settings.authorizationStatus == AuthorizationStatus.authorized) {
+        // 2. Get the unique FCM token for this device
+        String? token = await messaging.getToken(vapidKey: IdsConfig.vapidKey);
+
+        if (token != null) {
+          debugPrint('[*] FCM Token: $token');
+
+          // 3. Send token to backend using your project's config
+          final res = await http.post(
+            Uri.parse('${IdsConfig.baseUrl}/api/register-token'),
+            headers: IdsConfig.headers, // Automatically includes your X-API-Key
+            body: jsonEncode({'token': token}),
+          );
+
+          if (res.statusCode == 200) {
+            debugPrint('[*] FCM Token registered with backend successfully.');
+          } else {
+            debugPrint(
+                '[!] Failed to register FCM token. Status: ${res.statusCode}');
+          }
+        } else {
+          debugPrint('[!] FCM Token is null. Ensure Vapid_Key is provided.');
+        }
+      } else {
+        debugPrint(
+            '[!] User declined or has not accepted notification permissions.');
+      }
+    } catch (e) {
+      debugPrint('Notification setup error: $e');
     }
   }
 

@@ -24,6 +24,9 @@ import psycopg2
 from psycopg2.extras import RealDictCursor
 import os
 
+import firebase_admin
+from firebase_admin import credentials, messaging
+
 
 
 def get_db_connection():
@@ -91,9 +94,16 @@ class APIServer:
         # Manager knows about both
         self.retrain_manager = RetrainManager(self.gan_retrainer, self.jitter_retrainer)
 
+
+        self.registered_tokens = set()
+
+        self._initialize_fcm()
         self._initialize_ecc()
         self._register_routes()
 
+
+
+    
     # ------------------------------------------------------------------
     # ECC
     # ------------------------------------------------------------------
@@ -111,6 +121,42 @@ class APIServer:
         except Exception as e:
             print(f"[!] ECC Init Error: {e}")
             self.private_key = None
+
+    # ------------------------------------------------------------------
+    # Firebase Cloud Messaging (FCM)
+    # ------------------------------------------------------------------
+
+    def _initialize_fcm(self):
+        """Initializes the Firebase Admin SDK."""
+        try:
+            # Ensure the path to your service account JSON is correct
+            cred_path = "service-account.json" 
+            if os.path.exists(cred_path):
+                cred = credentials.Certificate(cred_path)
+                firebase_admin.initialize_app(cred)
+                print("[*] Firebase FCM initialized successfully.")
+            else:
+                print("[!] Firebase error: service-account.json not found.")
+        except Exception as e:
+            print(f"[!] Firebase Init Error: {e}")
+
+    def send_push_notification(self, title, body):
+        """Helper method to send alerts to all registered mobile devices."""
+        if not self.registered_tokens:
+            return
+        
+        try:
+            message = messaging.MulticastMessage(
+                notification=messaging.Notification(
+                    title=title,
+                    body=body,
+                ),
+                tokens=list(self.registered_tokens),
+            )
+            response = messaging.send_multicast(message)
+            print(f"[*] FCM: Successfully sent {response.success_count} alerts.")
+        except Exception as e:
+            print(f"[!] FCM Send Error: {e}")        
 
     def _generate_signature(self, data_dict):
         if not self.private_key:
@@ -164,6 +210,20 @@ class APIServer:
             else:
                 raise ValueError("Unsupported window")
             
+
+
+        @self.app.route("/api/register-token", methods=['POST'])
+        @self._require_api_key
+        def register_fcm_token():
+            try:
+                data = request.json
+                token = data.get('token')
+                if token:
+                    self.pipeline_manager.detector.registered_tokens.add(token)
+                    return self._secure_response({"message": "FCM token registered successfully"})
+                return self._secure_response({"error": "No token provided"}, 400)
+            except Exception as e:
+                return self._secure_response({"error": str(e)}, 500)
 
         @self.app.route("/api/settings/dmz_ips", methods=['GET', 'POST', 'DELETE'])
         @self._require_api_key

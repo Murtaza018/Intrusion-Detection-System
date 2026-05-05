@@ -26,6 +26,7 @@ class IdsProvider with ChangeNotifier {
     _state.addListener(notifyListeners);
     IdsDiagnostics.runECCSaneCheck();
     IdsDiagnostics.runRealDataTest();
+    _initializeNotifications();
   }
 
   final IdsState _state = IdsState();
@@ -86,6 +87,9 @@ class IdsProvider with ChangeNotifier {
 // Filter & selection passthrough
   void setSeverityFilter(String? s) => _filters.setSeverityFilter(s);
 
+  Future<void> _initializeNotifications() async {
+    await _api.setupNotifications();
+  }
   // ---------------------------------------------------------------------------
   // Pipeline control
   // ---------------------------------------------------------------------------

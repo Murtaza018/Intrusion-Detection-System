@@ -6,11 +6,17 @@
 class IdsConfig {
   IdsConfig._(); // prevent instantiation
 
-  static const String baseUrl = 'http://127.0.0.1:5001';
+  // static const String baseUrl = 'http://127.0.0.1:8000';
+
+  static const String baseUrl = 'http://192.168.1.8:8000';
 
   static const String apiKey = String.fromEnvironment(
     'API_KEY',
     defaultValue: 'MySuperSecretKey12345!',
+  );
+  static const String vapidKey = String.fromEnvironment(
+    'Vapid_Key',
+    defaultValue: '',
   );
 
   /// ECC P-256 public key X coordinate (hex) — extracted from cert.pem

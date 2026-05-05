@@ -50,7 +50,7 @@ else:
     print("✅ API_KEY loaded successfully.")
     
 FLASK_HOST = "0.0.0.0"
-FLASK_PORT = 5001
+FLASK_PORT = 8000
 
 # Feature Configuration
 NUM_FEATURES = 78

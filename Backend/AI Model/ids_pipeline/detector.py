@@ -17,7 +17,9 @@ from config import (
 import firebase_admin
 from firebase_admin import credentials, messaging
 
-
+# --- AWS 2018 CALIBRATED THRESHOLDS ---
+AWS_STANDARD_AE_THRESHOLD = 0.083687
+AWS_MASKED_AE_THRESHOLD = 0.063120
 
 class Detector:
 

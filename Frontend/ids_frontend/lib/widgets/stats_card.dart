@@ -7,6 +7,7 @@ class StatsCard extends StatelessWidget {
   final IconData icon;
 
   const StatsCard({
+    super.key,
     required this.title,
     required this.value,
     required this.color,
@@ -18,13 +19,16 @@ class StatsCard extends StatelessWidget {
     return Card(
       elevation: 2,
       child: Padding(
-        padding: EdgeInsets.all(16),
+        padding: const EdgeInsets.all(16),
         child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Icon(icon, color: color, size: 32),
-            SizedBox(height: 8),
+            const SizedBox(height: 8),
             Text(
               value,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
               style: TextStyle(
                 fontSize: 24,
                 fontWeight: FontWeight.bold,
@@ -33,6 +37,8 @@ class StatsCard extends StatelessWidget {
             ),
             Text(
               title,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
               style: TextStyle(
                 fontSize: 12,
                 color: Colors.grey[600],

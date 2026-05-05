@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
 import '../providers/ids_provider.dart';
 import '../models/packet.dart';
 
@@ -8,10 +7,12 @@ class LabelSelectionDialog extends StatefulWidget {
   final IdsProvider provider;
   final Function(String) onConfirmed;
 
-  const LabelSelectionDialog(
-      {required this.packet,
-      required this.provider,
-      required this.onConfirmed});
+  const LabelSelectionDialog({
+    super.key,
+    required this.packet,
+    required this.provider,
+    required this.onConfirmed,
+  });
 
   @override
   _LabelSelectionDialogState createState() => _LabelSelectionDialogState();
@@ -24,33 +25,33 @@ class _LabelSelectionDialogState extends State<LabelSelectionDialog> {
 
   @override
   Widget build(BuildContext context) {
-    // Filter out "BENIGN" from attack options usually, but let's keep all
     final labels = widget.provider.existingLabels;
 
     return AlertDialog(
-      title: Text("Label This Attack"),
+      title: const Text("Label This Attack"),
       content: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text("What type of attack is Packet #${widget.packet.id}?",
               style: TextStyle(color: Colors.grey[700])),
-          SizedBox(height: 16),
+          const SizedBox(height: 16),
 
-          // Toggle: Existing vs New
-          Row(
+          // CHANGED: Row to Wrap to prevent chip overflow on mobile
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
             children: [
               ChoiceChip(
-                label: Text("Existing Attack"),
+                label: const Text("Existing Attack"),
                 selected: !_isNew,
                 onSelected: (val) => setState(() {
                   _isNew = false;
                   _selectedLabel = null;
                 }),
               ),
-              SizedBox(width: 12),
               ChoiceChip(
-                label: Text("New / Zero-Day"),
+                label: const Text("New / Zero-Day"),
                 selected: _isNew,
                 onSelected: (val) => setState(() {
                   _isNew = true;
@@ -59,26 +60,30 @@ class _LabelSelectionDialogState extends State<LabelSelectionDialog> {
               ),
             ],
           ),
-          SizedBox(height: 16),
+          const SizedBox(height: 16),
 
           // Input Field
           if (!_isNew)
             DropdownButtonFormField<String>(
-              decoration: InputDecoration(
+              isExpanded: true, // Prevents text overflow inside dropdown
+              decoration: const InputDecoration(
                 labelText: "Select Attack Type",
                 border: OutlineInputBorder(),
                 contentPadding:
                     EdgeInsets.symmetric(horizontal: 12, vertical: 12),
               ),
               items: labels
-                  .map((l) => DropdownMenuItem(value: l, child: Text(l)))
+                  .map((l) => DropdownMenuItem(
+                        value: l,
+                        child: Text(l, overflow: TextOverflow.ellipsis),
+                      ))
                   .toList(),
               onChanged: (val) => setState(() => _selectedLabel = val),
             )
           else
             TextField(
               controller: _newLabelController,
-              decoration: InputDecoration(
+              decoration: const InputDecoration(
                 labelText: "Name New Attack",
                 hintText: "e.g., Exploit_CVE_2025",
                 border: OutlineInputBorder(),
@@ -90,13 +95,14 @@ class _LabelSelectionDialogState extends State<LabelSelectionDialog> {
       ),
       actions: [
         TextButton(
-            onPressed: () => Navigator.pop(context), child: Text("Cancel")),
+            onPressed: () => Navigator.pop(context),
+            child: const Text("Cancel")),
         FilledButton(
           onPressed: (_selectedLabel == null || _selectedLabel!.isEmpty)
               ? null
               : () => widget.onConfirmed(_selectedLabel!),
-          child: Text("Confirm Label"),
           style: FilledButton.styleFrom(backgroundColor: Colors.deepPurple),
+          child: const Text("Confirm Label"),
         ),
       ],
     );

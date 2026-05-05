@@ -10,9 +10,13 @@ class PacketDetailDialog extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Determine screen size to dictate dialog layout
+    final isDesktop = MediaQuery.of(context).size.width > 800;
+
     return Dialog(
       backgroundColor: const Color(0xFF0D1117), // Deep SOC Background
-      insetPadding: const EdgeInsets.all(20),
+      insetPadding:
+          EdgeInsets.all(isDesktop ? 20 : 10), // Tighter padding on mobile
       shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(12),
           side: BorderSide(color: Colors.white.withOpacity(0.05))),
@@ -22,11 +26,17 @@ class PacketDetailDialog extends StatelessWidget {
           children: [
             _buildHeader(context),
             Expanded(
-              child: Row(
+              // Flex dynamically switches between Row (desktop) and Column (mobile)
+              child: Flex(
+                direction: isDesktop ? Axis.horizontal : Axis.vertical,
                 children: [
-                  _buildTechnicalColumn(),
-                  Container(width: 1, color: Colors.white.withOpacity(0.05)),
-                  _buildAIColumn(context),
+                  _buildTechnicalColumn(isDesktop),
+                  // Divider changes orientation based on layout
+                  Container(
+                      width: isDesktop ? 1 : double.infinity,
+                      height: isDesktop ? double.infinity : 1,
+                      color: Colors.white.withOpacity(0.05)),
+                  _buildAIColumn(context, isDesktop),
                 ],
               ),
             ),
@@ -45,7 +55,7 @@ class PacketDetailDialog extends StatelessWidget {
             : Colors.greenAccent);
 
     return Container(
-      padding: const EdgeInsets.all(24),
+      padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
           border: Border(
               bottom: BorderSide(color: Colors.white.withOpacity(0.05)))),
@@ -61,7 +71,7 @@ class PacketDetailDialog extends StatelessWidget {
                     style: const TextStyle(
                         fontFamily: 'monospace',
                         fontWeight: FontWeight.bold,
-                        fontSize: 16,
+                        fontSize: 14, // Slightly reduced for mobile safety
                         letterSpacing: 1,
                         color: Color(0xFF00E5FF))),
                 Text(packet.summary,
@@ -78,11 +88,12 @@ class PacketDetailDialog extends StatelessWidget {
     );
   }
 
-  Widget _buildTechnicalColumn() {
+  Widget _buildTechnicalColumn(bool isDesktop) {
     return Expanded(
-      flex: 4,
+      flex:
+          isDesktop ? 4 : 3, // Takes less vertical space when stacked on mobile
       child: Container(
-        padding: const EdgeInsets.all(24),
+        padding: const EdgeInsets.all(20),
         color: Colors.black.withOpacity(0.1),
         child: SingleChildScrollView(
           child: Column(
@@ -95,7 +106,7 @@ class PacketDetailDialog extends StatelessWidget {
               _detail("SIZE", "${packet.length} BYTES"),
               _detail(
                   "TIME", packet.timestamp.toIso8601String().substring(11, 19)),
-              const SizedBox(height: 32),
+              const SizedBox(height: 24),
               if (packet.confidence > 0) ...[
                 _sectionTitle("DETECTION CONFIDENCE"),
                 const SizedBox(height: 12),
@@ -123,14 +134,15 @@ class PacketDetailDialog extends StatelessWidget {
     );
   }
 
-  Widget _buildAIColumn(BuildContext context) {
+  Widget _buildAIColumn(BuildContext context, bool isDesktop) {
     final explanation = packet.explanation;
     final List<dynamic> recommendations =
         explanation?['recommended_actions'] ?? [];
     final ScrollController _scrollController = ScrollController();
 
     return Expanded(
-      flex: 6,
+      flex:
+          isDesktop ? 6 : 7, // Takes more vertical space when stacked on mobile
       child: Container(
         padding: const EdgeInsets.symmetric(vertical: 8),
         child: explanation == null
@@ -142,7 +154,7 @@ class PacketDetailDialog extends StatelessWidget {
                 thumbVisibility: true,
                 child: SingleChildScrollView(
                   controller: _scrollController,
-                  padding: const EdgeInsets.all(24),
+                  padding: const EdgeInsets.all(20),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
@@ -163,8 +175,6 @@ class PacketDetailDialog extends StatelessWidget {
                                 color: Colors.white70,
                                 height: 1.6)),
                       ),
-
-                      // --- NEW: RECOMMENDED ACTIONS SECTION ---
                       if (recommendations.isNotEmpty) ...[
                         const SizedBox(height: 24),
                         _sectionTitle("RECOMMENDED MITIGATION"),
@@ -172,27 +182,24 @@ class PacketDetailDialog extends StatelessWidget {
                             .map((action) => _buildActionCard(action))
                             .toList(),
                       ],
-
                       const SizedBox(height: 24),
                       if (explanation['sensory_analysis'] != null)
                         _buildSensorySmallTiles(
                             explanation['sensory_analysis']),
-
-                      // ---------------------------------------------------------
-                      // THE REAL 9x9 MAE GRID (ONLY SHOWS FOR ZERO-DAYS)
-                      // ---------------------------------------------------------
                       if (packet.status == 'zero_day' &&
                           explanation['sensory_analysis'] != null &&
                           explanation['sensory_analysis']['original_grid'] !=
                               null) ...[
                         const SizedBox(height: 24),
                         _sectionTitle("MAE STRUCTURAL X-RAY (ZERO-DAY)"),
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                        // Changed from Row to Wrap to prevent overflow on mobile
+                        Wrap(
+                          alignment: WrapAlignment.spaceEvenly,
+                          spacing: 16,
+                          runSpacing: 16,
                           children: [
                             MaeHeatmapGrid(
                               title: "Original Traffic",
-                              // Cast the JSON array to List<double>
                               gridValues: List<double>.from(
                                   explanation['sensory_analysis']
                                           ['original_grid']
@@ -208,8 +215,6 @@ class PacketDetailDialog extends StatelessWidget {
                           ],
                         ),
                       ],
-                      // ---------------------------------------------------------
-
                       const SizedBox(height: 24),
                       if (explanation['top_contributing_factors'] != null) ...[
                         _sectionTitle("SHAP FEATURE ANALYSIS"),
@@ -247,11 +252,12 @@ class PacketDetailDialog extends StatelessWidget {
   }
 
   Widget _buildSensorySmallTiles(Map<String, dynamic> sensory) {
+    // Changed Row to Flex/Expanded to handle small screens gracefully
     return Row(
       children: [
         _miniTile("GNN TOPOLOGY", sensory['topological_shift'] ?? "STABLE",
             Icons.hub_outlined),
-        const SizedBox(width: 12),
+        const SizedBox(width: 8),
         _miniTile("MAE STRUCTURAL", sensory['visual_anomaly'] ?? "STABLE",
             Icons.grid_view_rounded),
       ],
@@ -262,7 +268,7 @@ class PacketDetailDialog extends StatelessWidget {
     bool alert = val != "Stable" && val != "Consistent";
     return Expanded(
       child: Container(
-        padding: const EdgeInsets.all(12),
+        padding: const EdgeInsets.all(10),
         decoration: BoxDecoration(
             color: Colors.white.withOpacity(0.02),
             border: Border.all(
@@ -274,15 +280,21 @@ class PacketDetailDialog extends StatelessWidget {
           children: [
             Row(children: [
               Icon(icon, size: 12, color: Colors.white24),
-              const SizedBox(width: 8),
-              Text(label,
-                  style: const TextStyle(
-                      fontSize: 9,
-                      color: Colors.white24,
-                      fontWeight: FontWeight.bold))
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                        fontSize: 9,
+                        color: Colors.white24,
+                        fontWeight: FontWeight.bold)),
+              )
             ]),
             const SizedBox(height: 6),
             Text(val,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
                 style: TextStyle(
                     fontSize: 11,
                     fontWeight: FontWeight.bold,
@@ -302,11 +314,16 @@ class PacketDetailDialog extends StatelessWidget {
       child: Column(
         children: [
           Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-            Text(factor['factor'],
-                style: const TextStyle(
-                    fontSize: 10,
-                    color: Colors.white70,
-                    fontFamily: 'monospace')),
+            Expanded(
+              child: Text(factor['factor'],
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                      fontSize: 10,
+                      color: Colors.white70,
+                      fontFamily: 'monospace')),
+            ),
+            const SizedBox(width: 8),
             Text(factor['observed_value'],
                 style: const TextStyle(
                     fontSize: 10,
@@ -329,13 +346,17 @@ class PacketDetailDialog extends StatelessWidget {
   Widget _buildFooter(BuildContext context) {
     final provider = Provider.of<IdsProvider>(context, listen: false);
     return Container(
+      width: double.infinity,
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
           color: Colors.black.withOpacity(0.2),
           border:
               Border(top: BorderSide(color: Colors.white.withOpacity(0.05)))),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.end,
+      // Replaced Row with Wrap so buttons stack neatly on mobile
+      child: Wrap(
+        alignment: WrapAlignment.end,
+        spacing: 12,
+        runSpacing: 12,
         children: [
           if (packet.status == 'normal')
             _actionBtn(context, provider, "REPORT MISS",
@@ -343,11 +364,9 @@ class PacketDetailDialog extends StatelessWidget {
           else ...[
             _actionBtn(context, provider, "FALSE ALARM",
                 Icons.check_circle_outline, Colors.greenAccent, 'jitter'),
-            if (packet.status == 'zero_day') ...[
-              const SizedBox(width: 12),
+            if (packet.status == 'zero_day')
               _actionBtn(context, provider, "CONFIRM NOVELTY",
                   Icons.biotech_outlined, const Color(0xFF7C4DFF), 'gan'),
-            ]
           ]
         ],
       ),
@@ -389,8 +408,16 @@ class PacketDetailDialog extends StatelessWidget {
         Text(l,
             style: const TextStyle(
                 color: Colors.white30, fontSize: 10, letterSpacing: 1)),
-        Text(v,
-            style: const TextStyle(
-                color: Colors.white70, fontSize: 11, fontFamily: 'monospace'))
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(v,
+              textAlign: TextAlign.right,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                  color: Colors.white70,
+                  fontSize: 11,
+                  fontFamily: 'monospace')),
+        )
       ]));
 }

@@ -44,6 +44,9 @@ class _ReportSummaryScreenState extends State<ReportSummaryScreen> {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
 
+    // Layout awareness
+    final isDesktop = MediaQuery.of(context).size.width > 600;
+
     if (_loading) {
       return const Scaffold(
         body: Center(child: CircularProgressIndicator()),
@@ -85,20 +88,29 @@ class _ReportSummaryScreenState extends State<ReportSummaryScreen> {
           SliverToBoxAdapter(
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              child: Row(
+              // Converted to Wrap to prevent overflow if date text is long
+              child: Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                alignment: WrapAlignment.spaceBetween,
                 children: [
-                  FilterChip(
-                    label: const Text("Daily"),
-                    selected: _window == "1d",
-                    onSelected: (v) => v ? _updateWindow("1d") : null,
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      FilterChip(
+                        label: const Text("Daily"),
+                        selected: _window == "1d",
+                        onSelected: (v) => v ? _updateWindow("1d") : null,
+                      ),
+                      const SizedBox(width: 8),
+                      FilterChip(
+                        label: const Text("Weekly"),
+                        selected: _window == "1w",
+                        onSelected: (v) => v ? _updateWindow("1w") : null,
+                      ),
+                    ],
                   ),
-                  const SizedBox(width: 8),
-                  FilterChip(
-                    label: const Text("Weekly"),
-                    selected: _window == "1w",
-                    onSelected: (v) => v ? _updateWindow("1w") : null,
-                  ),
-                  const Spacer(),
                   Text(
                     "Traffic Ending: ${end.split('T')[0]}",
                     style: theme.textTheme.labelSmall,
@@ -118,8 +130,10 @@ class _ReportSummaryScreenState extends State<ReportSummaryScreen> {
                 GridView.count(
                   shrinkWrap: true,
                   physics: const NeverScrollableScrollPhysics(),
-                  crossAxisCount: 2,
-                  childAspectRatio: 2.8, // Compact boxes
+                  // Scale column count based on screen width
+                  crossAxisCount: isDesktop ? 4 : 2,
+                  // Adjust aspect ratio so text doesn't squish on small phones
+                  childAspectRatio: isDesktop ? 2.8 : 1.8,
                   crossAxisSpacing: 12,
                   mainAxisSpacing: 12,
                   children: [

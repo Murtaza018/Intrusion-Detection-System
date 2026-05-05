@@ -4,6 +4,8 @@ import 'package:provider/provider.dart';
 import '../providers/ids_provider.dart';
 
 class SettingsScreen extends StatefulWidget {
+  const SettingsScreen({Key? key}) : super(key: key);
+
   @override
   _SettingsScreenState createState() => _SettingsScreenState();
 }
@@ -14,14 +16,22 @@ class _SettingsScreenState extends State<SettingsScreen> {
   @override
   void initState() {
     super.initState();
-    // Load IPs when screen initializes
     WidgetsBinding.instance.addPostFrameCallback((_) {
       Provider.of<IdsProvider>(context, listen: false).loadDmzIps();
     });
   }
 
   @override
+  void dispose() {
+    _ipController.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
+    // Make padding dynamic based on screen size
+    final isDesktop = MediaQuery.of(context).size.width > 600;
+
     return Scaffold(
       backgroundColor: const Color(0xFF0D1117),
       appBar: AppBar(
@@ -39,8 +49,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 fontWeight: FontWeight.w900,
                 letterSpacing: 1.0)),
       ),
-      body: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 20),
+      body: SingleChildScrollView(
+        // Added scroll view in case list gets long
+        padding:
+            EdgeInsets.symmetric(horizontal: isDesktop ? 40 : 16, vertical: 20),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -51,14 +63,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     fontWeight: FontWeight.bold,
                     letterSpacing: 1.5)),
             const SizedBox(height: 20),
-            _buildDmzPanel(),
+            _buildDmzPanel(isDesktop),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildDmzPanel() {
+  Widget _buildDmzPanel(bool isDesktop) {
     return Container(
       decoration: BoxDecoration(
         color: const Color(0xFF15191C),
@@ -74,11 +86,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
             children: [
               const Icon(Icons.security, color: Colors.orangeAccent, size: 16),
               const SizedBox(width: 8),
-              const Text("DMZ IDENTIFICATION NODES",
-                  style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 12,
-                      fontWeight: FontWeight.bold)),
+              Expanded(
+                // Wrapped in Expanded to prevent overflow on very small screens
+                child: const Text("DMZ IDENTIFICATION NODES",
+                    style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold)),
+              ),
             ],
           ),
           const SizedBox(height: 6),
@@ -86,7 +101,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               "IPs or subnet prefixes (e.g., '192.168.1.10' or '172.16.') that will be visually tagged as DMZ in the live graph.",
               style: TextStyle(color: Colors.white38, fontSize: 10)),
           const SizedBox(height: 20),
-          _buildAddIpRow(),
+          _buildAddIpRow(isDesktop),
           const SizedBox(height: 16),
           const Divider(color: Colors.white10, height: 1),
           const SizedBox(height: 16),
@@ -96,58 +111,73 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
-  Widget _buildAddIpRow() {
-    return Row(
-      children: [
-        Expanded(
-          child: Container(
-            height: 36,
-            decoration: BoxDecoration(
-              color: const Color(0xFF0D1117),
-              borderRadius: BorderRadius.circular(4),
-              border: Border.all(color: Colors.white12),
-            ),
-            child: TextField(
-              controller: _ipController,
-              style: const TextStyle(
-                  color: Colors.white, fontSize: 12, fontFamily: 'monospace'),
-              decoration: const InputDecoration(
-                hintText: "Enter IP or Prefix (e.g., 10.0.0.5)",
-                hintStyle: TextStyle(color: Colors.white24, fontSize: 11),
-                border: InputBorder.none,
-                contentPadding:
-                    EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-                isCollapsed: true,
-              ),
-            ),
+  Widget _buildAddIpRow(bool isDesktop) {
+    final textField = Container(
+      height: 40, // Slightly taller for mobile touch targets
+      decoration: BoxDecoration(
+        color: const Color(0xFF0D1117),
+        borderRadius: BorderRadius.circular(4),
+        border: Border.all(color: Colors.white12),
+      ),
+      child: TextField(
+        controller: _ipController,
+        style: const TextStyle(
+            color: Colors.white, fontSize: 12, fontFamily: 'monospace'),
+        decoration: const InputDecoration(
+          hintText: "Enter IP or Prefix (e.g., 10.0.0.5)",
+          hintStyle: TextStyle(color: Colors.white24, fontSize: 11),
+          border: InputBorder.none,
+          contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+          isCollapsed: true,
+        ),
+      ),
+    );
+
+    final submitButton = SizedBox(
+      height: 40,
+      width: isDesktop ? null : double.infinity, // Full width on mobile
+      child: ElevatedButton(
+        onPressed: () {
+          if (_ipController.text.isNotEmpty) {
+            Provider.of<IdsProvider>(context, listen: false)
+                .addDmzIp(_ipController.text.trim());
+            _ipController.clear();
+          }
+        },
+        style: ElevatedButton.styleFrom(
+          backgroundColor: const Color(0xFF00E5FF).withOpacity(0.15),
+          foregroundColor: const Color(0xFF00E5FF),
+          elevation: 0,
+          side: BorderSide(color: const Color(0xFF00E5FF).withOpacity(0.5)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(4),
           ),
         ),
-        const SizedBox(width: 12),
-        ElevatedButton(
-          onPressed: () {
-            if (_ipController.text.isNotEmpty) {
-              Provider.of<IdsProvider>(context, listen: false)
-                  .addDmzIp(_ipController.text.trim());
-              _ipController.clear();
-            }
-          },
-          style: ElevatedButton.styleFrom(
-            backgroundColor: const Color(0xFF00E5FF).withOpacity(0.15),
-            foregroundColor: const Color(0xFF00E5FF),
-            elevation: 0,
-            side: BorderSide(color: const Color(0xFF00E5FF).withOpacity(0.5)),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(4),
-            ),
-          ),
-          child: const Text("REGISTER IP",
-              style: TextStyle(
-                  fontSize: 10,
-                  fontWeight: FontWeight.bold,
-                  letterSpacing: 1.0)),
-        )
-      ],
+        child: const Text("REGISTER IP",
+            style: TextStyle(
+                fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 1.0)),
+      ),
     );
+
+    // Dynamic layout: Row for desktop, Column for mobile
+    if (isDesktop) {
+      return Row(
+        children: [
+          Expanded(child: textField),
+          const SizedBox(width: 12),
+          submitButton,
+        ],
+      );
+    } else {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          textField,
+          const SizedBox(height: 12),
+          submitButton,
+        ],
+      );
+    }
   }
 
   Widget _buildIpList() {
@@ -163,6 +193,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
         return ListView.builder(
           shrinkWrap: true,
+          physics:
+              const NeverScrollableScrollPhysics(), // Important when inside SingleChildScrollView
           itemCount: provider.dmzIps.length,
           itemBuilder: (context, index) {
             final ip = provider.dmzIps[index];
@@ -178,12 +210,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 children: [
                   const Icon(Icons.lan, color: Colors.white24, size: 14),
                   const SizedBox(width: 12),
-                  Text(ip,
-                      style: const TextStyle(
-                          color: Colors.white70,
-                          fontSize: 12,
-                          fontFamily: 'monospace')),
-                  const Spacer(),
+                  Expanded(
+                    // Prevent long IPs from causing overflow
+                    child: Text(ip,
+                        style: const TextStyle(
+                            color: Colors.white70,
+                            fontSize: 12,
+                            fontFamily: 'monospace')),
+                  ),
                   IconButton(
                     icon: const Icon(Icons.delete_outline,
                         color: Colors.redAccent, size: 16),

@@ -6,9 +6,11 @@ import 'mae_visualizer_dialog.dart';
 import '../models/packet.dart';
 
 class PacketList extends StatelessWidget {
+  // Added const constructor for performance
+  const PacketList({super.key});
+
   @override
   Widget build(BuildContext context) {
-    // Using Selector to only rebuild when the filtered list changes
     return Selector<IdsProvider, List<Packet>>(
       selector: (_, provider) => provider.filteredPackets,
       builder: (context, packets, child) {
@@ -20,7 +22,6 @@ class PacketList extends StatelessWidget {
 
         return ListView.builder(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-          // Always add one for the "Load More" section
           itemCount: packets.length + 1,
           itemBuilder: (context, index) {
             if (index == packets.length) {
@@ -41,10 +42,10 @@ class PacketList extends StatelessWidget {
           const Icon(Icons.radar, size: 40, color: Colors.white10),
           const SizedBox(height: 16),
           const Text('NO SEQUENCES MATCHING FILTER',
+              textAlign: TextAlign.center,
               style: TextStyle(
                   color: Colors.white24, letterSpacing: 2, fontSize: 10)),
           const SizedBox(height: 24),
-          // FIX: Add the button here so users can load data even if the current view is empty
           _buildLoadMoreButton(provider),
         ],
       ),
@@ -74,14 +75,12 @@ class PacketList extends StatelessWidget {
 
 class PacketListItem extends StatelessWidget {
   final Packet packet;
-  const PacketListItem({required this.packet});
+
+  // Added const constructor for performance
+  const PacketListItem({super.key, required this.packet});
 
   @override
   Widget build(BuildContext context) {
-    // Using listen: false because we already know if it's selected from the IdsProvider state
-    final provider = Provider.of<IdsProvider>(context, listen: false);
-
-    // We use a Selector here to handle the selection state changes efficiently
     return Selector<IdsProvider, bool>(
       selector: (_, p) => p.isSelected(packet.id),
       builder: (context, isSelected, child) {
@@ -116,18 +115,25 @@ class PacketListItem extends StatelessWidget {
             child: ListTile(
               dense: true,
               visualDensity: VisualDensity.compact,
-              title: Text(packet.summary,
-                  style: const TextStyle(
-                      fontFamily: 'monospace',
-                      fontSize: 12,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.white)),
+              title: Text(
+                packet.summary,
+                maxLines: 1, // Enforce single line
+                overflow: TextOverflow.ellipsis, // Add ellipsis on overflow
+                style: const TextStyle(
+                    fontFamily: 'monospace',
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.white),
+              ),
               subtitle: Text(
-                  "${packet.srcIp} -> ${packet.dstIp} | ${packet.protocol} | ${packet.length}B",
-                  style: const TextStyle(
-                      color: Colors.white38,
-                      fontSize: 10,
-                      fontFamily: 'monospace')),
+                "${packet.srcIp} -> ${packet.dstIp} | ${packet.protocol} | ${packet.length}B",
+                maxLines: 1, // Enforce single line
+                overflow: TextOverflow.ellipsis, // Add ellipsis on overflow
+                style: const TextStyle(
+                    color: Colors.white38,
+                    fontSize: 10,
+                    fontFamily: 'monospace'),
+              ),
               trailing: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [

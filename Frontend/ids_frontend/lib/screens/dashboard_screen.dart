@@ -71,43 +71,72 @@ class _DashboardScreenState extends State<DashboardScreen> {
   Widget build(BuildContext context) {
     final provider = Provider.of<IdsProvider>(context, listen: false);
 
-    return Scaffold(
-      body: Row(
-        children: [
-          _buildSidebar(context, provider),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                _buildTopBar(provider),
-                _buildSearchFilterBar(context, provider),
-                Selector<IdsProvider, bool>(
-                  selector: (_, p) => p.isRunning,
-                  builder: (context, isRunning, child) {
-                    return isRunning
-                        ? Padding(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 24, vertical: 4),
-                            child: SensoryDashboard(),
-                          )
-                        : const SizedBox.shrink();
-                  },
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        // Define our breakpoint for desktop vs mobile
+        final isDesktop = constraints.maxWidth >= 850;
+
+        return Scaffold(
+          // On mobile, the command center becomes a swipeable drawer
+          drawer: !isDesktop
+              ? Drawer(
+                  backgroundColor: const Color(0xFF0D1117),
+                  child: SafeArea(child: _buildSidebar(context, provider)),
+                )
+              : null,
+          // On mobile, we need an AppBar to show the hamburger menu
+          appBar: !isDesktop
+              ? AppBar(
+                  title: const Text("NEURAL-IDS CONTROL"),
+                  actions: const [
+                    Icon(Icons.notifications_none,
+                        color: Colors.white12, size: 24),
+                    SizedBox(width: 16),
+                  ],
+                )
+              : null,
+          body: Row(
+            children: [
+              // On desktop, pin the sidebar to the left
+              if (isDesktop) _buildSidebar(context, provider),
+
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Only show the custom top bar on desktop
+                    if (isDesktop) _buildTopBar(provider),
+
+                    _buildSearchFilterBar(context, provider),
+
+                    Selector<IdsProvider, bool>(
+                      selector: (_, p) => p.isRunning,
+                      builder: (context, isRunning, child) {
+                        return isRunning
+                            ? const Padding(
+                                padding: EdgeInsets.symmetric(
+                                    horizontal: 24, vertical: 4),
+                                child: SensoryDashboard(),
+                              )
+                            : const SizedBox.shrink();
+                      },
+                    ),
+                    _buildStreamHeader(),
+                    const Expanded(child: PacketList()),
+                  ],
                 ),
-                _buildStreamHeader(),
-                Expanded(child: PacketList()),
-              ],
-            ),
+              ),
+            ],
           ),
-        ],
-      ),
-      floatingActionButton: FloatingActionButton.small(
-        onPressed: () => _showAddPacketDialog(context),
-        backgroundColor: Colors.orangeAccent,
-        child: const Icon(Icons.bug_report, size: 18),
-      ),
+          floatingActionButton: FloatingActionButton.small(
+            onPressed: () => _showAddPacketDialog(context),
+            backgroundColor: Colors.orangeAccent,
+            child: const Icon(Icons.bug_report, size: 18),
+          ),
+        );
+      },
     );
   }
-
   // ── Stream header ─────────────────────────────────────────────────────────
 
   Widget _buildStreamHeader() {
@@ -185,66 +214,76 @@ class _DashboardScreenState extends State<DashboardScreen> {
           Container(height: 1, color: Colors.white.withOpacity(0.04)),
 
           // ── Bottom row: filter chips + severity slider ──────────────────
+          // ── Bottom row: filter chips + severity slider ──────────────────
           Padding(
             padding: const EdgeInsets.fromLTRB(12, 5, 12, 5),
-            child: Row(children: [
-              // Type filter chips
-              _buildFilterChip(provider, 'ALL', 'all'),
-              _buildFilterChip(provider, 'NORMAL', 'normal'),
-              _buildFilterChip(provider, 'THREATS', 'known_attack'),
-              _buildFilterChip(provider, 'ZERO-DAY', 'zero_day'),
+            // Wrap in scroll view to prevent mobile overflow
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: [
+                  // Type filter chips
+                  _buildFilterChip(provider, 'ALL', 'all'),
+                  _buildFilterChip(provider, 'NORMAL', 'normal'),
+                  _buildFilterChip(provider, 'THREATS', 'known_attack'),
+                  _buildFilterChip(provider, 'ZERO-DAY', 'zero_day'),
 
-              Container(
-                  width: 1,
-                  height: 16,
-                  color: Colors.white10,
-                  margin: const EdgeInsets.symmetric(horizontal: 12)),
+                  Container(
+                      width: 1,
+                      height: 16,
+                      color: Colors.white10,
+                      margin: const EdgeInsets.symmetric(horizontal: 12)),
 
-              // Severity filter chips
-              const Text('SEVERITY',
-                  style: TextStyle(
-                      color: Colors.white24, fontSize: 8, letterSpacing: 1.2)),
-              const SizedBox(width: 8),
-              _buildSeverityChip(provider, 'ANY', null),
-              _buildSeverityChip(provider, 'LOW', 'low'),
-              _buildSeverityChip(provider, 'MED', 'medium'),
-              _buildSeverityChip(provider, 'HIGH', 'high'),
-              _buildSeverityChip(provider, 'CRIT', 'critical'),
+                  // Severity filter chips
+                  const Text('SEVERITY',
+                      style: TextStyle(
+                          color: Colors.white24,
+                          fontSize: 8,
+                          letterSpacing: 1.2)),
+                  const SizedBox(width: 8),
+                  _buildSeverityChip(provider, 'ANY', null),
+                  _buildSeverityChip(provider, 'LOW', 'low'),
+                  _buildSeverityChip(provider, 'MED', 'medium'),
+                  _buildSeverityChip(provider, 'HIGH', 'high'),
+                  _buildSeverityChip(provider, 'CRIT', 'critical'),
 
-              const Spacer(),
+                  const SizedBox(
+                      width: 16), // Replaced Spacer() with fixed spacing
 
-              // Active filter indicator
-              Consumer<IdsProvider>(
-                builder: (_, p, __) {
-                  final active = p.activeFilterCount;
-                  if (active == 0) return const SizedBox.shrink();
-                  return GestureDetector(
-                    onTap: () => p.clearAllFilters(),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 8, vertical: 3),
-                      decoration: BoxDecoration(
-                        color: Colors.redAccent.withOpacity(0.1),
-                        borderRadius: BorderRadius.circular(3),
-                        border: Border.all(
-                            color: Colors.redAccent.withOpacity(0.3)),
-                      ),
-                      child: Row(mainAxisSize: MainAxisSize.min, children: [
-                        const Icon(Icons.filter_list,
-                            color: Colors.redAccent, size: 10),
-                        const SizedBox(width: 4),
-                        Text('$active ACTIVE · CLEAR',
-                            style: const TextStyle(
-                                color: Colors.redAccent,
-                                fontSize: 8,
-                                fontWeight: FontWeight.bold,
-                                letterSpacing: 0.5)),
-                      ]),
-                    ),
-                  );
-                },
+                  // Active filter indicator
+                  Consumer<IdsProvider>(
+                    builder: (_, p, __) {
+                      final active = p.activeFilterCount;
+                      if (active == 0) return const SizedBox.shrink();
+                      return GestureDetector(
+                        onTap: () => p.clearAllFilters(),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 8, vertical: 3),
+                          decoration: BoxDecoration(
+                            color: Colors.redAccent.withOpacity(0.1),
+                            borderRadius: BorderRadius.circular(3),
+                            border: Border.all(
+                                color: Colors.redAccent.withOpacity(0.3)),
+                          ),
+                          child: Row(mainAxisSize: MainAxisSize.min, children: [
+                            const Icon(Icons.filter_list,
+                                color: Colors.redAccent, size: 10),
+                            const SizedBox(width: 4),
+                            Text('$active ACTIVE · CLEAR',
+                                style: const TextStyle(
+                                    color: Colors.redAccent,
+                                    fontSize: 8,
+                                    fontWeight: FontWeight.bold,
+                                    letterSpacing: 0.5)),
+                          ]),
+                        ),
+                      );
+                    },
+                  ),
+                ],
               ),
-            ]),
+            ),
           ),
         ],
       ),

@@ -1,4 +1,3 @@
-// packet_tile.dart
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/ids_provider.dart';
@@ -8,7 +7,7 @@ import '../models/packet.dart';
 
 class PacketTile extends StatelessWidget {
   final Packet packet;
-  const PacketTile({required this.packet});
+  const PacketTile({super.key, required this.packet});
 
   @override
   Widget build(BuildContext context) {
@@ -44,6 +43,8 @@ class PacketTile extends StatelessWidget {
           dense: true,
           visualDensity: VisualDensity.compact,
           title: Text(packet.summary,
+              maxLines: 1, // Added protection
+              overflow: TextOverflow.ellipsis, // Added protection
               style: const TextStyle(
                   fontFamily: 'monospace',
                   fontSize: 12,
@@ -51,6 +52,8 @@ class PacketTile extends StatelessWidget {
                   color: Colors.white)),
           subtitle: Text(
               "${packet.srcIp} -> ${packet.dstIp} | ${packet.protocol} | ${packet.length}B",
+              maxLines: 1, // Added protection
+              overflow: TextOverflow.ellipsis, // Added protection
               style: const TextStyle(
                   color: Colors.white38,
                   fontSize: 10,

@@ -6,9 +6,9 @@
 class IdsConfig {
   IdsConfig._(); // prevent instantiation
 
-  // static const String baseUrl = 'http://127.0.0.1:8000';
+  static const String baseUrl = 'http://127.0.0.1:8000';
 
-  static const String baseUrl = 'http://192.168.1.8:8000';
+  // static const String baseUrl = 'http://192.168.1.14:8000';
 
   static const String apiKey = String.fromEnvironment(
     'API_KEY',

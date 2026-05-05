@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import '../providers/ids_provider.dart';
 import '../providers/ids_api_client.dart';
 import 'dart:async';
+import 'dart:math' as math;
 
 class AlertHistoryScreen extends StatefulWidget {
   const AlertHistoryScreen({Key? key}) : super(key: key);
@@ -62,11 +63,7 @@ class _AlertHistoryScreenState extends State<AlertHistoryScreen>
     super.dispose();
   }
 
-  // ── Data fetching ─────────────────────────────────────────────────────────
-
-  // Add the isSilent parameter, defaulting to false
   Future<void> _fetchHistory({bool isSilent = false}) async {
-    // Only show the loading screen if it is a manual action (like changing windows)
     if (!isSilent) {
       setState(() {
         _loading = true;
@@ -77,15 +74,14 @@ class _AlertHistoryScreenState extends State<AlertHistoryScreen>
     try {
       final data = await _client.fetchHistory(
         window: _selectedWindow,
-        limit: 50000, // Matching the larger limit we set in the Python backend
+        limit: 50000,
       );
 
       setState(() {
         _historyData = data ?? {};
-        _loading = false; // Always clear the loading state once data arrives
+        _loading = false;
       });
 
-      // Only restart the fade animation if it was a hard manual refresh
       if (!isSilent) {
         _fadeCtrl.forward(from: 0);
       }
@@ -97,8 +93,6 @@ class _AlertHistoryScreenState extends State<AlertHistoryScreen>
       });
     }
   }
-
-  // ── Derived data ──────────────────────────────────────────────────────────
 
   Map<String, dynamic> get _perf =>
       (_historyData['performance'] as Map<String, dynamic>?) ?? {};
@@ -112,99 +106,107 @@ class _AlertHistoryScreenState extends State<AlertHistoryScreen>
   List get _volumeSeries => (_historyData['alerts_volume'] as List?) ?? [];
   List get _typeSeries => (_historyData['by_type'] as List?) ?? [];
 
-  // ── Build ─────────────────────────────────────────────────────────────────
-
   @override
   Widget build(BuildContext context) {
+    // Layout awareness
+    final isDesktop = MediaQuery.of(context).size.width > 800;
+
     return Scaffold(
       backgroundColor: _bg,
       body: Column(children: [
-        _buildHeader(),
+        _buildHeader(isDesktop),
         Expanded(
           child: _loading
               ? const Center(child: CircularProgressIndicator(color: _cyan))
               : _error != null
                   ? _buildError()
-                  : _buildBody(),
+                  : _buildBody(isDesktop),
         ),
       ]),
     );
   }
 
-  // ── Header ────────────────────────────────────────────────────────────────
-
-  Widget _buildHeader() {
+  Widget _buildHeader(bool isDesktop) {
     return Container(
+      width: double.infinity,
       padding: const EdgeInsets.fromLTRB(20, 16, 20, 14),
       decoration: const BoxDecoration(
         color: _surface,
         border: Border(bottom: BorderSide(color: _border)),
       ),
-      child: Row(children: [
-        // Title
-        Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          const Text('ALERT ANALYTICS',
-              style: TextStyle(
-                  color: _cyan,
-                  fontSize: 13,
-                  fontWeight: FontWeight.bold,
-                  letterSpacing: 2.5)),
-          const SizedBox(height: 2),
-          Text('Historical intrusion data · window: $_selectedWindow',
-              style: const TextStyle(color: Colors.white38, fontSize: 11)),
-        ]),
-        const Spacer(),
-        // Window selector pills
-        Row(
-          children: _windows.map((w) {
-            final selected = w == _selectedWindow;
-            return GestureDetector(
-              onTap: () {
-                if (w != _selectedWindow) {
-                  setState(() => _selectedWindow = w);
-                  _fetchHistory();
-                }
-              },
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 200),
-                margin: const EdgeInsets.only(left: 6),
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
-                decoration: BoxDecoration(
-                  color:
-                      selected ? _cyan.withOpacity(0.15) : Colors.transparent,
-                  borderRadius: BorderRadius.circular(20),
-                  border: Border.all(color: selected ? _cyan : Colors.white24),
+      // Converted to Wrap to prevent mobile overflow
+      child: Wrap(
+        spacing: 16,
+        runSpacing: 12,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        alignment: WrapAlignment.spaceBetween,
+        children: [
+          Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            const Text('ALERT ANALYTICS',
+                style: TextStyle(
+                    color: _cyan,
+                    fontSize: 13,
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: 2.5)),
+            const SizedBox(height: 2),
+            Text('Historical intrusion data · window: $_selectedWindow',
+                style: const TextStyle(color: Colors.white38, fontSize: 11)),
+          ]),
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ..._windows.map((w) {
+                final selected = w == _selectedWindow;
+                return GestureDetector(
+                  onTap: () {
+                    if (w != _selectedWindow) {
+                      setState(() => _selectedWindow = w);
+                      _fetchHistory();
+                    }
+                  },
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 200),
+                    margin: const EdgeInsets.only(left: 6),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+                    decoration: BoxDecoration(
+                      color: selected
+                          ? _cyan.withOpacity(0.15)
+                          : Colors.transparent,
+                      borderRadius: BorderRadius.circular(20),
+                      border:
+                          Border.all(color: selected ? _cyan : Colors.white24),
+                    ),
+                    child: Text(w,
+                        style: TextStyle(
+                            color: selected ? _cyan : Colors.white54,
+                            fontSize: 11,
+                            fontWeight: selected
+                                ? FontWeight.bold
+                                : FontWeight.normal)),
+                  ),
+                );
+              }).toList(),
+              const SizedBox(width: 12),
+              GestureDetector(
+                onTap: _fetchHistory,
+                child: Container(
+                  padding: const EdgeInsets.all(7),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.05),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: _border),
+                  ),
+                  child: const Icon(Icons.refresh,
+                      color: Colors.white54, size: 16),
                 ),
-                child: Text(w,
-                    style: TextStyle(
-                        color: selected ? _cyan : Colors.white54,
-                        fontSize: 11,
-                        fontWeight:
-                            selected ? FontWeight.bold : FontWeight.normal)),
               ),
-            );
-          }).toList(),
-        ),
-        const SizedBox(width: 12),
-        // Refresh button
-        GestureDetector(
-          onTap: _fetchHistory,
-          child: Container(
-            padding: const EdgeInsets.all(7),
-            decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.05),
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: _border),
-            ),
-            child: const Icon(Icons.refresh, color: Colors.white54, size: 16),
+            ],
           ),
-        ),
-      ]),
+        ],
+      ),
     );
   }
-
-  // ── Error state ───────────────────────────────────────────────────────────
 
   Widget _buildError() {
     return Center(
@@ -223,9 +225,7 @@ class _AlertHistoryScreenState extends State<AlertHistoryScreen>
     );
   }
 
-  // ── Main body ─────────────────────────────────────────────────────────────
-
-  Widget _buildBody() {
+  Widget _buildBody(bool isDesktop) {
     return FadeTransition(
       opacity: _fadeCtrl,
       child: SingleChildScrollView(
@@ -233,11 +233,9 @@ class _AlertHistoryScreenState extends State<AlertHistoryScreen>
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // KPI row
-            _buildKpiRow(),
+            _buildKpiRow(isDesktop),
             const SizedBox(height: 20),
 
-            // Volume chart
             _SectionHeader(
               title: 'Alert Volume',
               subtitle: 'Packets flagged over time',
@@ -253,7 +251,6 @@ class _AlertHistoryScreenState extends State<AlertHistoryScreen>
             ),
             const SizedBox(height: 20),
 
-            // Type breakdown
             _SectionHeader(
               title: 'Intrusion Types',
               subtitle: 'Distribution by classification',
@@ -261,11 +258,15 @@ class _AlertHistoryScreenState extends State<AlertHistoryScreen>
               color: _purple,
             ),
             const SizedBox(height: 10),
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
+            // Flex changes layout dynamically
+            Flex(
+              direction: isDesktop ? Axis.horizontal : Axis.vertical,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 Expanded(
-                  flex: 3,
+                  flex: isDesktop
+                      ? 3
+                      : 0, // Drop flex on mobile to allow intrinsic height
                   child: _ChartCard(
                     height: 200,
                     child: _typeSeries.isEmpty
@@ -273,9 +274,9 @@ class _AlertHistoryScreenState extends State<AlertHistoryScreen>
                         : _buildTypeBarChart(),
                   ),
                 ),
-                const SizedBox(width: 12),
+                SizedBox(width: isDesktop ? 12 : 0, height: isDesktop ? 0 : 12),
                 Expanded(
-                  flex: 2,
+                  flex: isDesktop ? 2 : 0,
                   child: _ChartCard(
                     height: 200,
                     child: _typeSeries.isEmpty
@@ -287,7 +288,6 @@ class _AlertHistoryScreenState extends State<AlertHistoryScreen>
             ),
             const SizedBox(height: 20),
 
-            // Performance metrics
             _SectionHeader(
               title: 'Performance Metrics',
               subtitle: 'Detection quality indicators',
@@ -295,7 +295,7 @@ class _AlertHistoryScreenState extends State<AlertHistoryScreen>
               color: _green,
             ),
             const SizedBox(height: 10),
-            _buildPerformanceRow(),
+            _buildPerformanceRow(isDesktop),
             const SizedBox(height: 8),
           ],
         ),
@@ -303,41 +303,78 @@ class _AlertHistoryScreenState extends State<AlertHistoryScreen>
     );
   }
 
-  // ── KPI row ───────────────────────────────────────────────────────────────
-
-  Widget _buildKpiRow() {
-    return Row(children: [
-      _KpiTile(
-        label: 'Total Alerts',
-        value: _totalAlerts.toString(),
-        icon: Icons.notifications_active,
-        color: _cyan,
-      ),
-      const SizedBox(width: 10),
-      _KpiTile(
-        label: 'Total Packets',
-        value: _formatCompact(_totalPackets),
-        icon: Icons.wifi,
-        color: _purple,
-      ),
-      const SizedBox(width: 10),
-      _KpiTile(
-        label: 'Detection Rate',
-        value: '${(_detRate * 100).toStringAsFixed(1)}%',
-        icon: Icons.radar,
-        color: _green,
-      ),
-      const SizedBox(width: 10),
-      _KpiTile(
-        label: 'Avg Anomaly',
-        value: (_avgAnomaly * 100).toStringAsFixed(2) + '%',
-        icon: Icons.warning_amber,
-        color: _orange,
-      ),
-    ]);
+  Widget _buildKpiRow(bool isDesktop) {
+    // Converted to GridView for mobile safety
+    return GridView.count(
+      crossAxisCount: isDesktop ? 4 : 2,
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      crossAxisSpacing: 10,
+      mainAxisSpacing: 10,
+      childAspectRatio: isDesktop ? 2.5 : 1.9,
+      children: [
+        _KpiTile(
+          label: 'Total Alerts',
+          value: _totalAlerts.toString(),
+          icon: Icons.notifications_active,
+          color: _cyan,
+        ),
+        _KpiTile(
+          label: 'Total Packets',
+          value: _formatCompact(_totalPackets),
+          icon: Icons.wifi,
+          color: _purple,
+        ),
+        _KpiTile(
+          label: 'Detection Rate',
+          value: '${(_detRate * 100).toStringAsFixed(1)}%',
+          icon: Icons.radar,
+          color: _green,
+        ),
+        _KpiTile(
+          label: 'Avg Anomaly',
+          value: '${(_avgAnomaly * 100).toStringAsFixed(2)}%',
+          icon: Icons.warning_amber,
+          color: _orange,
+        ),
+      ],
+    );
   }
 
-  // ── Volume chart ──────────────────────────────────────────────────────────
+  Widget _buildPerformanceRow(bool isDesktop) {
+    return GridView.count(
+      crossAxisCount: isDesktop ? 3 : 1,
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      crossAxisSpacing: 10,
+      mainAxisSpacing: 10,
+      childAspectRatio: isDesktop ? 3.0 : 4.0,
+      children: [
+        _MetricGauge(
+          label: 'Detection Rate',
+          value: _detRate,
+          color: _green,
+          format: (v) => '${(v * 100).toStringAsFixed(1)}%',
+        ),
+        _MetricGauge(
+          label: 'Avg Anomaly Score',
+          value: _avgAnomaly,
+          maxValue: 1.0,
+          color: _orange,
+          format: (v) => v.toStringAsFixed(4),
+        ),
+        _MetricGauge(
+          label: 'False Positive Est.',
+          value: _fpEstimate,
+          color: _red,
+          format: (v) => '${(v * 100).toStringAsFixed(1)}%',
+        ),
+      ],
+    );
+  }
+
+  // --- KEEP YOUR EXISTING CHART BUILDER METHODS BELOW THIS LINE ---
+  // (_buildVolumeChart, _buildTypeBarChart, _buildTypePieChart, _formatCompact, etc.)
 
   Widget _buildVolumeChart() {
     final spots = <FlSpot>[];
@@ -347,7 +384,7 @@ class _AlertHistoryScreenState extends State<AlertHistoryScreen>
       spots.add(FlSpot(i.toDouble(), count));
     }
 
-    final maxY = spots.map((s) => s.y).fold(0.0, math_max) * 1.2;
+    final maxY = spots.map((s) => s.y).fold(0.0, math.max) * 1.2;
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(8, 12, 16, 8),
@@ -455,22 +492,18 @@ class _AlertHistoryScreenState extends State<AlertHistoryScreen>
     );
   }
 
-  // ── Bar chart (intrusion types) ───────────────────────────────────────────
-
   Widget _buildTypeBarChart() {
     final barColors = [_cyan, _red, _purple, _orange, _green];
     final groups = <BarChartGroupData>[];
 
-    // Compute maxY first so bar width can be proportional
     final maxY = (_typeSeries
                 .map((e) => (e['count'] as num?)?.toDouble() ?? 0)
-                .fold(0.0, math_max) *
+                .fold(0.0, math.max) *
             1.25)
         .clamp(10.0, double.infinity);
 
     for (int i = 0; i < _typeSeries.length; i++) {
       final count = (_typeSeries[i]['count'] as num?)?.toDouble() ?? 0;
-      // Ensure even tiny values (e.g. zero_day=7) render as a visible bar
       final displayY = count < 1 ? 0.0 : count;
       groups.add(BarChartGroupData(
         x: i,
@@ -561,8 +594,6 @@ class _AlertHistoryScreenState extends State<AlertHistoryScreen>
     );
   }
 
-  // ── Pie chart ─────────────────────────────────────────────────────────────
-
   Widget _buildTypePieChart() {
     final pieColors = [_cyan, _red, _purple, _orange, _green];
     final total = _typeSeries.fold<double>(
@@ -599,38 +630,6 @@ class _AlertHistoryScreenState extends State<AlertHistoryScreen>
     );
   }
 
-  // ── Performance metrics row ───────────────────────────────────────────────
-
-  Widget _buildPerformanceRow() {
-    return Row(children: [
-      _MetricGauge(
-        label: 'Detection Rate',
-        value: _detRate,
-        color: _green,
-        format: (v) => '${(v * 100).toStringAsFixed(1)}%',
-      ),
-      const SizedBox(width: 10),
-      _MetricGauge(
-        label: 'Avg Anomaly Score',
-        value: _avgAnomaly,
-        maxValue: 1.0,
-        color: _orange,
-        format: (v) => v.toStringAsFixed(4),
-      ),
-      const SizedBox(width: 10),
-      _MetricGauge(
-        label: 'False Positive Est.',
-        value: _fpEstimate,
-        color: _red,
-        format: (v) => '${(v * 100).toStringAsFixed(1)}%',
-      ),
-    ]);
-  }
-
-  // ── Utilities ─────────────────────────────────────────────────────────────
-
-  static double math_max(double a, double b) => a > b ? a : b;
-
   static String _formatCompact(int n) {
     if (n >= 1000000) return '${(n / 1000000).toStringAsFixed(1)}M';
     if (n >= 1000) return '${(n / 1000).toStringAsFixed(1)}k';
@@ -638,10 +637,7 @@ class _AlertHistoryScreenState extends State<AlertHistoryScreen>
   }
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// Sub-widgets
-// ═══════════════════════════════════════════════════════════════════════════
-
+// ... Keep your existing _SectionHeader, _ChartCard, _EmptyChart, _KpiTile, _MetricGauge, _PieBadge exactly as they are ...
 class _SectionHeader extends StatelessWidget {
   final String title;
   final String subtitle;
@@ -732,31 +728,34 @@ class _KpiTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Expanded(
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-        decoration: BoxDecoration(
-          color: color.withOpacity(0.07),
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: color.withOpacity(0.2)),
-        ),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Row(children: [
-            Icon(icon, color: color, size: 14),
-            const Spacer(),
-          ]),
-          const SizedBox(height: 8),
-          Text(value,
-              style: TextStyle(
-                  color: color,
-                  fontSize: 20,
-                  fontWeight: FontWeight.bold,
-                  letterSpacing: -0.5)),
-          const SizedBox(height: 2),
-          Text(label,
-              style: const TextStyle(color: Colors.white38, fontSize: 10)),
-        ]),
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.07),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: color.withOpacity(0.2)),
       ),
+      child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Row(children: [
+              Icon(icon, color: color, size: 14),
+              const Spacer(),
+            ]),
+            const SizedBox(height: 4),
+            Text(value,
+                style: TextStyle(
+                    color: color,
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: -0.5)),
+            const SizedBox(height: 2),
+            Text(label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(color: Colors.white38, fontSize: 10)),
+          ]),
     );
   }
 }
@@ -780,36 +779,33 @@ class _MetricGauge extends StatelessWidget {
   Widget build(BuildContext context) {
     final pct = (value / maxValue).clamp(0.0, 1.0);
 
-    return Expanded(
-      child: Container(
-        padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(
-          color: const Color(0xFF0D1117),
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: Colors.white.withOpacity(0.07)),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(label,
-                style: const TextStyle(color: Colors.white54, fontSize: 10)),
-            const SizedBox(height: 8),
-            Text(format(value),
-                style: TextStyle(
-                    color: color, fontSize: 18, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 8),
-            // Progress bar
-            ClipRRect(
-              borderRadius: BorderRadius.circular(4),
-              child: LinearProgressIndicator(
-                value: pct,
-                minHeight: 4,
-                backgroundColor: Colors.white.withOpacity(0.08),
-                valueColor: AlwaysStoppedAnimation(color),
-              ),
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0xFF0D1117),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: Colors.white.withOpacity(0.07)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(label,
+              style: const TextStyle(color: Colors.white54, fontSize: 10)),
+          const SizedBox(height: 8),
+          Text(format(value),
+              style: TextStyle(
+                  color: color, fontSize: 18, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 8),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(4),
+            child: LinearProgressIndicator(
+              value: pct,
+              minHeight: 4,
+              backgroundColor: Colors.white.withOpacity(0.08),
+              valueColor: AlwaysStoppedAnimation(color),
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }

@@ -19,6 +19,8 @@ class _AdaptationScreenState extends State<AdaptationScreen> {
   @override
   Widget build(BuildContext context) {
     final provider = Provider.of<IdsProvider>(context);
+    // Layout awareness
+    final isDesktop = MediaQuery.of(context).size.width > 600;
 
     return Scaffold(
       backgroundColor: const Color(0xFF0D1117),
@@ -51,7 +53,9 @@ class _AdaptationScreenState extends State<AdaptationScreen> {
             color: Colors.white10,
           ),
           Expanded(
-            child: Row(
+            // Use Flex to stack vertically on mobile, horizontally on desktop
+            child: Flex(
+              direction: isDesktop ? Axis.horizontal : Axis.vertical,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 Expanded(
@@ -62,9 +66,10 @@ class _AdaptationScreenState extends State<AdaptationScreen> {
                     Colors.greenAccent,
                   ),
                 ),
-                const VerticalDivider(
-                  width: 1,
-                  thickness: 1,
+                // Divider switches orientation
+                Container(
+                  width: isDesktop ? 1 : double.infinity,
+                  height: isDesktop ? double.infinity : 1,
                   color: Colors.white10,
                 ),
                 Expanded(
@@ -80,7 +85,7 @@ class _AdaptationScreenState extends State<AdaptationScreen> {
           ),
         ],
       ),
-      bottomNavigationBar: _buildBottomBar(context, provider),
+      bottomNavigationBar: _buildBottomBar(context, provider, isDesktop),
     );
   }
 
@@ -90,19 +95,24 @@ class _AdaptationScreenState extends State<AdaptationScreen> {
     if (provider.ganQueue.isEmpty) return const SizedBox.shrink();
 
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+      padding: const EdgeInsets.symmetric(
+          horizontal: 16, vertical: 16), // Tighter mobile padding
       decoration: BoxDecoration(
         color: const Color(0xFF15191C),
-        borderRadius: BorderRadius.circular(4),
-        border: Border.all(color: Colors.white12),
+        border: Border(bottom: BorderSide(color: Colors.white12)),
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          // Converted to Wrap to prevent collision on narrow screens
+          Wrap(
+            spacing: 12,
+            runSpacing: 12,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            alignment: WrapAlignment.spaceBetween,
             children: [
-              Text(
+              const Text(
                 "Assign Label:",
                 style: TextStyle(
                   fontWeight: FontWeight.bold,
@@ -110,14 +120,15 @@ class _AdaptationScreenState extends State<AdaptationScreen> {
                   color: Colors.white70,
                 ),
               ),
-              Row(
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
                 children: [
                   _buildCompactChip(
                     "Existing",
                     !provider.isNewAttack,
                     () => provider.setBatchLabel(null, false),
                   ),
-                  const SizedBox(width: 8),
                   _buildCompactChip(
                     "New Zero-Day",
                     provider.isNewAttack,
@@ -145,6 +156,8 @@ class _AdaptationScreenState extends State<AdaptationScreen> {
                     cursorColor: Colors.orangeAccent,
                   )
                 : DropdownButtonFormField<String>(
+                    isExpanded:
+                        true, // Prevents overflow if dropdown text is long
                     decoration: _compactInputDecoration(
                       "Select Existing Attack Type",
                       Icons.category,
@@ -171,6 +184,7 @@ class _AdaptationScreenState extends State<AdaptationScreen> {
                                   child: Text(
                                     l,
                                     style: const TextStyle(color: Colors.white),
+                                    overflow: TextOverflow.ellipsis,
                                   ),
                                 ))
                             .toList(),
@@ -237,7 +251,8 @@ class _AdaptationScreenState extends State<AdaptationScreen> {
     );
   }
 
-  Widget _buildBottomBar(BuildContext context, IdsProvider provider) {
+  Widget _buildBottomBar(
+      BuildContext context, IdsProvider provider, bool isDesktop) {
     bool hasLabel =
         provider.batchLabel != null && provider.batchLabel!.isNotEmpty;
     bool hasGanPackets = provider.ganQueue.isNotEmpty;
@@ -248,67 +263,124 @@ class _AdaptationScreenState extends State<AdaptationScreen> {
     bool trainingReady = consistencyReady &&
         (provider.ganQueue.isEmpty || provider.consistencyChecked);
 
-    return Container(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
-      decoration: BoxDecoration(
-        color: Colors.black.withOpacity(0.05),
-        border: const Border(
-          top: BorderSide(color: Colors.white10),
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black12,
-            blurRadius: 6,
-            offset: const Offset(0, -2),
+    return SafeArea(
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+        decoration: BoxDecoration(
+          color: Colors.black.withOpacity(0.05),
+          border: const Border(
+            top: BorderSide(color: Colors.white10),
           ),
-        ],
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          if ((hasGanPackets || hasJitterPackets) && !trainingReady)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 8.0),
-              child: Text(
-                (hasGanPackets && !hasLabel)
-                    ? "* Select a label above to proceed"
-                    : (hasGanPackets && !provider.consistencyChecked)
-                        ? "* Check consistency before training"
-                        : "", // jitter-only — no warning needed
-                style: const TextStyle(
-                  color: Colors.orangeAccent,
-                  fontSize: 11,
-                  fontWeight: FontWeight.w500,
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black12,
+              blurRadius: 6,
+              offset: const Offset(0, -2),
+            ),
+          ],
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            if ((hasGanPackets || hasJitterPackets) && !trainingReady)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 12.0),
+                child: Text(
+                  (hasGanPackets && !hasLabel)
+                      ? "* Select a label above to proceed"
+                      : (hasGanPackets && !provider.consistencyChecked)
+                          ? "* Check consistency before training"
+                          : "",
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    color: Colors.orangeAccent,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w500,
+                  ),
                 ),
               ),
-            ),
-          Row(
-            children: [
-              // CHECK CONSISTENCY
-              if (hasGanPackets)
-                Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed:
-                        (!consistencyReady || provider.totalSelected <= 1)
-                            ? null
-                            : () => _showAnalysisDialog(context, provider),
-                    icon: const Icon(
-                      Icons.analytics_outlined,
-                      size: 18,
-                      color: Colors.white70,
-                    ),
-                    label: Text(
-                      provider.consistencyChecked
-                          ? "Re-Check"
-                          : "Check Consistency",
-                      style: const TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w500,
-                        color: Colors.white,
+            // Flex changes axis based on available width
+            Flex(
+              direction: isDesktop ? Axis.horizontal : Axis.vertical,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                if (hasGanPackets)
+                  Expanded(
+                    flex: isDesktop ? 1 : 0,
+                    child: OutlinedButton.icon(
+                      onPressed:
+                          (!consistencyReady || provider.totalSelected <= 1)
+                              ? null
+                              : () => _showAnalysisDialog(context, provider),
+                      icon: const Icon(
+                        Icons.analytics_outlined,
+                        size: 18,
+                        color: Colors.white70,
+                      ),
+                      label: Text(
+                        provider.consistencyChecked
+                            ? "Re-Check"
+                            : "Check Consistency",
+                        style: const TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w500,
+                          color: Colors.white,
+                        ),
+                      ),
+                      style: OutlinedButton.styleFrom(
+                        side: const BorderSide(color: Color(0xFF7C4DFF)),
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(4),
+                        ),
                       ),
                     ),
-                    style: OutlinedButton.styleFrom(
-                      side: const BorderSide(color: Color(0xFF7C4DFF)),
+                  ),
+                if (hasGanPackets)
+                  SizedBox(
+                      height: isDesktop ? 0 : 12, width: isDesktop ? 12 : 0),
+                Expanded(
+                  flex: isDesktop ? 1 : 0,
+                  child: ElevatedButton.icon(
+                    onPressed: !trainingReady
+                        ? null
+                        : () async {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text("Sending data..."),
+                                duration: Duration(seconds: 1),
+                                backgroundColor: Color(0xFF15191C),
+                              ),
+                            );
+                            final jobId = await provider.sendRetrainRequest();
+                            bool success = jobId != null;
+                            if (success) {
+                              provider.clearQueues();
+                              if (context.mounted) {
+                                Navigator.pop(context);
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content: Text("Training Queued!"),
+                                    backgroundColor: Color(0xFF15191C),
+                                  ),
+                                );
+                              }
+                            }
+                          },
+                    icon: const Icon(
+                      Icons.model_training,
+                      size: 18,
+                      color: Colors.white,
+                    ),
+                    label: const Text(
+                      "Start Retraining",
+                      style: TextStyle(fontSize: 12, color: Colors.white),
+                    ),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF7C4DFF),
+                      foregroundColor: Colors.white,
+                      elevation: 2,
                       padding: const EdgeInsets.symmetric(vertical: 14),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(4),
@@ -316,59 +388,10 @@ class _AdaptationScreenState extends State<AdaptationScreen> {
                     ),
                   ),
                 ),
-              if (hasGanPackets) const SizedBox(width: 12),
-
-              // START TRAINING
-              Expanded(
-                child: ElevatedButton.icon(
-                  onPressed: !trainingReady
-                      ? null
-                      : () async {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                              content: Text("Sending data..."),
-                              duration: Duration(seconds: 1),
-                              backgroundColor: Color(0xFF15191C),
-                            ),
-                          );
-                          final jobId = await provider.sendRetrainRequest();
-                          bool success = jobId != null;
-                          if (success) {
-                            provider.clearQueues();
-                            if (context.mounted) {
-                              Navigator.pop(context);
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(
-                                  content: Text("Training Queued!"),
-                                  backgroundColor: Color(0xFF15191C),
-                                ),
-                              );
-                            }
-                          }
-                        },
-                  icon: const Icon(
-                    Icons.model_training,
-                    size: 18,
-                    color: Colors.white,
-                  ),
-                  label: Text(
-                    "Start Retraining",
-                    style: const TextStyle(fontSize: 12, color: Colors.white),
-                  ),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF7C4DFF),
-                    foregroundColor: Colors.white,
-                    elevation: 2,
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(4),
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ],
+              ],
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -383,9 +406,6 @@ class _AdaptationScreenState extends State<AdaptationScreen> {
           width: double.infinity,
           decoration: BoxDecoration(
             color: color.withOpacity(0.1),
-            borderRadius: const BorderRadius.vertical(
-              top: Radius.circular(4),
-            ),
           ),
           child: Text(
             title,
@@ -399,7 +419,7 @@ class _AdaptationScreenState extends State<AdaptationScreen> {
         ),
         Expanded(
           child: queue.isEmpty
-              ? Center(
+              ? const Center(
                   child: Text(
                     "Empty",
                     style: TextStyle(color: Colors.white30, fontSize: 11),
@@ -409,9 +429,8 @@ class _AdaptationScreenState extends State<AdaptationScreen> {
                   itemCount: queue.length,
                   padding: EdgeInsets.zero,
                   itemBuilder: (ctx, i) => Container(
-                    decoration: BoxDecoration(
-                      border: const Border(
-                          bottom: BorderSide(color: Colors.white10)),
+                    decoration: const BoxDecoration(
+                      border: Border(bottom: BorderSide(color: Colors.white10)),
                     ),
                     child: ListTile(
                       dense: true,
@@ -443,10 +462,13 @@ class _AdaptationScreenState extends State<AdaptationScreen> {
                         onTap: () =>
                             Provider.of<IdsProvider>(context, listen: false)
                                 .toggleSelection(queue[i], ''),
-                        child: const Icon(
-                          Icons.close,
-                          size: 16,
-                          color: Colors.white24,
+                        child: const Padding(
+                          padding: EdgeInsets.all(4.0), // Better touch target
+                          child: Icon(
+                            Icons.close,
+                            size: 16,
+                            color: Colors.white24,
+                          ),
                         ),
                       ),
                     ),
@@ -483,9 +505,9 @@ class _AdaptationScreenState extends State<AdaptationScreen> {
         context: context,
         builder: (_) => AlertDialog(
           backgroundColor: const Color(0xFF15191C),
-          title: Text(
+          title: const Text(
             "Consistency Report",
-            style: const TextStyle(
+            style: TextStyle(
               fontSize: 16,
               fontWeight: FontWeight.bold,
               letterSpacing: 0.5,

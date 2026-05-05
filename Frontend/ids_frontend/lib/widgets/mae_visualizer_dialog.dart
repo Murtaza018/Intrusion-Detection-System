@@ -197,6 +197,8 @@ class _MaeVisualizerDialogState extends State<MaeVisualizerDialog> {
           ),
           const SizedBox(height: 8),
           Text(name,
+              maxLines: 1, // Prevent overflow if name is long
+              overflow: TextOverflow.ellipsis,
               style: const TextStyle(
                   color: Colors.white,
                   fontSize: 11,
@@ -229,89 +231,18 @@ class _MaeVisualizerDialogState extends State<MaeVisualizerDialog> {
     );
   }
 
-  // @override
-  // Widget build(BuildContext context) {
-  //   // 1. Grab the full 78-feature array we just added to the Python backend!
-  //   final List<dynamic> rawFeatures =
-  //       widget.packet.explanation?['raw_features'] ?? [];
-
-  //   // 2. Prepare an 81-slot grid (78 features + 3 blank padding squares at the end)
-  //   List<double> gridData = List.filled(81, 0.0);
-
-  //   // 3. Fill the grid with the actual raw traffic data
-  //   for (int i = 0; i < rawFeatures.length && i < 81; i++) {
-  //     gridData[i] =
-  //         (double.tryParse(rawFeatures[i]?.toString() ?? '0.0') ?? 0.0)
-  //             .clamp(0.0, 1.0);
-  //   }
-
-  //   return AlertDialog(
-  //     backgroundColor: const Color(0xFF0D1117),
-  //     insetPadding: const EdgeInsets.all(20),
-  //     shape: RoundedRectangleBorder(
-  //         borderRadius: BorderRadius.circular(12),
-  //         side: const BorderSide(color: Colors.white10)),
-  //     content: SizedBox(
-  //       width: 800,
-  //       child: Column(
-  //         mainAxisSize: MainAxisSize.min,
-  //         children: [
-  //           _buildHeader(),
-  //           const SizedBox(height: 24),
-  //           Row(
-  //             crossAxisAlignment: CrossAxisAlignment.start,
-  //             children: [
-  //               _buildGrid(gridData),
-  //               const SizedBox(width: 24),
-  //               Expanded(child: _buildDualInspector(gridData)),
-  //             ],
-  //           ),
-  //           const SizedBox(height: 24),
-  //           _buildFooter(),
-  //         ],
-  //       ),
-  //     ),
-  //   );
-  // }
-
-  // Widget _buildHeader() {
-  //   return Row(
-  //     children: [
-  //       const Icon(Icons.blur_on_rounded,
-  //           color: Color(0xFF00E5FF), size: 24), // Changed Icon
-  //       const SizedBox(width: 12),
-  //       Column(
-  //         crossAxisAlignment: CrossAxisAlignment.start,
-  //         children: const [
-  //           // Updated Titles to reflect the new Raw Feature reality
-  //           Text("RAW FEATURE HEATMAP",
-  //               style: TextStyle(
-  //                   color: Colors.white,
-  //                   fontSize: 16,
-  //                   fontWeight: FontWeight.bold,
-  //                   letterSpacing: 1)),
-  //           Text(
-  //               "Select two network features to cross-reference their scaled intensity",
-  //               style: TextStyle(color: Colors.white24, fontSize: 10)),
-  //         ],
-  //       ),
-  //     ],
-  //   );
-  // }
-
   @override
   Widget build(BuildContext context) {
     final explanation = widget.packet.explanation ?? {};
     bool isZeroDay = widget.packet.status == 'zero_day';
+    final isDesktop = MediaQuery.of(context).size.width > 600; // Viewport check
 
-    // Prepare an 81-slot grid (78 features + 3 blank padding squares at the end)
     List<double> gridData = List.filled(81, 0.0);
 
     if (isZeroDay &&
         explanation['sensory_analysis'] != null &&
         explanation['sensory_analysis']['original_grid'] != null &&
         explanation['sensory_analysis']['reconstructed_grid'] != null) {
-      // 1. ZERO-DAY MODE: Calculate and show the MAE Reconstruction Error
       List<dynamic> orig = explanation['sensory_analysis']['original_grid'];
       List<dynamic> recon =
           explanation['sensory_analysis']['reconstructed_grid'];
@@ -319,11 +250,9 @@ class _MaeVisualizerDialogState extends State<MaeVisualizerDialog> {
       for (int i = 0; i < orig.length && i < 81; i++) {
         double oVal = double.tryParse(orig[i].toString()) ?? 0.0;
         double rVal = double.tryParse(recon[i].toString()) ?? 0.0;
-        // The error magnitude becomes the heatmap intensity
         gridData[i] = (oVal - rVal).abs().clamp(0.0, 1.0);
       }
     } else {
-      // 2. STANDARD MODE: Show Raw Features
       final List<dynamic> rawFeatures = explanation['raw_features'] ?? [];
       for (int i = 0; i < rawFeatures.length && i < 81; i++) {
         gridData[i] =
@@ -334,28 +263,41 @@ class _MaeVisualizerDialogState extends State<MaeVisualizerDialog> {
 
     return AlertDialog(
       backgroundColor: const Color(0xFF0D1117),
-      insetPadding: const EdgeInsets.all(20),
+      // Tighter padding on mobile so the 300px grid fits
+      insetPadding: EdgeInsets.all(isDesktop ? 20 : 10),
       shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(12),
           side: const BorderSide(color: Colors.white10)),
-      content: SizedBox(
-        width: 800,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            _buildHeader(isZeroDay), // Pass the status to the header
-            const SizedBox(height: 24),
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                _buildGrid(gridData),
-                const SizedBox(width: 24),
-                Expanded(child: _buildDualInspector(gridData)),
-              ],
-            ),
-            const SizedBox(height: 24),
-            _buildFooter(),
-          ],
+      content: ConstrainedBox(
+        // Fixed the 800px hardcoded death box
+        constraints: const BoxConstraints(maxWidth: 800),
+        child: SingleChildScrollView(
+          // Added scrolling for mobile stacking
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _buildHeader(isZeroDay),
+              const SizedBox(height: 24),
+              // Use Flex to stack vertically on mobile and side-by-side on desktop
+              Flex(
+                direction: isDesktop ? Axis.horizontal : Axis.vertical,
+                crossAxisAlignment: isDesktop
+                    ? CrossAxisAlignment.start
+                    : CrossAxisAlignment.center,
+                children: [
+                  _buildGrid(gridData),
+                  SizedBox(
+                      height: isDesktop ? 0 : 24, width: isDesktop ? 24 : 0),
+                  // Only use Expanded if horizontal, otherwise it causes infinite height errors in Column
+                  isDesktop
+                      ? Expanded(child: _buildDualInspector(gridData))
+                      : _buildDualInspector(gridData),
+                ],
+              ),
+              const SizedBox(height: 24),
+              _buildFooter(),
+            ],
+          ),
         ),
       ),
     );
@@ -368,29 +310,39 @@ class _MaeVisualizerDialogState extends State<MaeVisualizerDialog> {
             color: isZeroDay ? Colors.orangeAccent : const Color(0xFF00E5FF),
             size: 24),
         const SizedBox(width: 12),
-        Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(isZeroDay ? "MAE RECONSTRUCTION ERROR" : "RAW FEATURE HEATMAP",
-                style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 16,
-                    fontWeight: FontWeight.bold,
-                    letterSpacing: 1)),
-            Text(
-                isZeroDay
-                    ? "Highlighting structural anomalies with high reconstruction error"
-                    : "Select two network features to cross-reference their scaled intensity",
-                style: const TextStyle(color: Colors.white24, fontSize: 10)),
-          ],
+        Expanded(
+          // Wrapped in Expanded to prevent text overflow
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                  isZeroDay
+                      ? "MAE RECONSTRUCTION ERROR"
+                      : "RAW FEATURE HEATMAP",
+                  style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 14, // Slightly smaller for safety
+                      fontWeight: FontWeight.bold,
+                      letterSpacing: 1)),
+              Text(
+                  isZeroDay
+                      ? "Highlighting structural anomalies with high reconstruction error"
+                      : "Select two network features to cross-reference their scaled intensity",
+                  style: const TextStyle(color: Colors.white24, fontSize: 10)),
+            ],
+          ),
         ),
       ],
     );
   }
 
   Widget _buildFooter() {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+    return Wrap(
+      // Swapped Row for Wrap to prevent button clipping
+      alignment: WrapAlignment.spaceBetween,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      spacing: 12,
+      runSpacing: 12,
       children: [
         const Text("Alpha (Cyan) vs Beta (Pink) Correlation Mode",
             style: TextStyle(

@@ -348,7 +348,7 @@ class _AlertHistoryScreenState extends State<AlertHistoryScreen>
       physics: const NeverScrollableScrollPhysics(),
       crossAxisSpacing: 10,
       mainAxisSpacing: 10,
-      childAspectRatio: isDesktop ? 3.0 : 4.0,
+      childAspectRatio: isDesktop ? 3.0 : 2.8,
       children: [
         _MetricGauge(
           label: 'Detection Rate',
@@ -788,13 +788,19 @@ class _MetricGauge extends StatelessWidget {
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisAlignment:
+            MainAxisAlignment.center, // Perfectly center vertically
         children: [
           Text(label,
               style: const TextStyle(color: Colors.white54, fontSize: 10)),
           const SizedBox(height: 8),
-          Text(format(value),
-              style: TextStyle(
-                  color: color, fontSize: 18, fontWeight: FontWeight.bold)),
+          // FittedBox ensures large percentages don't wrap or overflow
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Text(format(value),
+                style: TextStyle(
+                    color: color, fontSize: 18, fontWeight: FontWeight.bold)),
+          ),
           const SizedBox(height: 8),
           ClipRRect(
             borderRadius: BorderRadius.circular(4),

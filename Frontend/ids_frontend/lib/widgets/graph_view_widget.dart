@@ -323,6 +323,10 @@ class _GraphViewWidgetState extends State<GraphViewWidget>
     final severity = _severityLabel(node.anomaly);
     final sColor = _anomalyColor(node.anomaly);
 
+    // FIX: Core routing logic check to accurately identify public/private IP addresses
+    final bool isPrivateIp =
+        node.ip.startsWith('192.168.') || node.ip.startsWith('10.');
+
     return _Panel(
       maxWidth: maxWidth,
       child: Column(
@@ -363,18 +367,19 @@ class _GraphViewWidgetState extends State<GraphViewWidget>
             _DetailField('Subnet', node.subnet,
                 valueStyle:
                     const TextStyle(color: Colors.white70, fontSize: 12)),
+
+            // FIX: Applied the IP check here to dynamically label External vs Internal
             _DetailField(
                 'Zone',
                 node.isDmz
                     ? 'DMZ 🛡️'
-                    : (node.subnet.contains('External')
-                        ? 'External 🌍'
-                        : 'Internal 🔒'),
+                    : (!isPrivateIp ? 'External 🌍' : 'Internal 🔒'),
                 valueStyle: TextStyle(
                     color: node.isDmz ? Colors.orangeAccent : Colors.white70,
                     fontSize: 12,
                     fontWeight:
                         node.isDmz ? FontWeight.bold : FontWeight.normal)),
+
             _DetailField('Gateway', node.isGateway ? 'True 🌐' : 'False ❌',
                 valueStyle: TextStyle(
                     color: node.isGateway ? Colors.greenAccent : Colors.white54,

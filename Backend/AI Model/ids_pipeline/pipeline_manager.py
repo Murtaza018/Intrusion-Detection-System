@@ -132,10 +132,18 @@ class PipelineManager:
             
             sys.stdout.flush()
 
+            # sniff_kwargs = {
+            #     "prn": packet_handler,
+            #     "store": 0,
+            #     "filter": "ip"
+            # }
+            # Only capture IP traffic involving your Inside, Outside, and DMZ subnets
+            bpf_filter = "ip and (net 192.168.10.0/24 or net 203.0.113.0/24 or net 192.168.50.0/24)"
+
             sniff_kwargs = {
                 "prn": packet_handler,
                 "store": 0,
-                "filter": "ip"
+                "filter": bpf_filter
             }
             
             print(f"[DEBUG] Calling sniff() with conf.iface={conf.iface}")

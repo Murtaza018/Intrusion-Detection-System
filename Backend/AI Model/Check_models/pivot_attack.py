@@ -1,12 +1,17 @@
-from scapy.all import send, IP, TCP
+from scapy.all import sendp, Ether, IP, TCP
 
-# Replace with the exact Windows interface string you used in your sniffer
+# Ensure this matches your sniffer interface exactly
 IFACE = "VMware Network Adapter VMnet2" 
 
 print("[*] Simulating compromised DMZ Web-Server pivoting to Internal PC...")
 
-# Spoof the Web-Server IP, attacking the Inside PC on port 445 (SMB)
-malicious_packet = IP(src="192.168.50.10", dst="192.168.10.10")/TCP(dport=445, flags="S")
+# We wrap the IP packet in a raw Ethernet() frame. 
+# This bypasses the Windows kernel routing table and forces the packet onto the wire.
+malicious_frame = Ether()/IP(src="192.168.50.10", dst="192.168.10.10")/TCP(dport=445, flags="S")
 
-# Blast it to create an anomalous flow
-send(malicious_packet, iface=IFACE, loop=1, inter=0.01)
+print("[*] Launching 500-packet Layer-2 SYN burst...")
+
+# sendp() operates at Layer 2. It will not be blocked by Windows.
+sendp(malicious_frame, iface=IFACE, count=500, inter=0.001, verbose=False)
+
+print("[*] Burst complete. Check the React Dashboard.")

@@ -258,34 +258,54 @@ class _AlertHistoryScreenState extends State<AlertHistoryScreen>
               color: _purple,
             ),
             const SizedBox(height: 10),
-            // Flex changes layout dynamically
-            Flex(
-              direction: isDesktop ? Axis.horizontal : Axis.vertical,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Expanded(
-                  flex: isDesktop
-                      ? 3
-                      : 0, // Drop flex on mobile to allow intrinsic height
-                  child: _ChartCard(
+
+            // --- THE FIX: Separate layouts instead of a broken Flex ---
+            if (isDesktop)
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    flex: 3,
+                    child: _ChartCard(
+                      height: 200,
+                      child: _typeSeries.isEmpty
+                          ? const _EmptyChart()
+                          : _buildTypeBarChart(),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    flex: 2,
+                    child: _ChartCard(
+                      height: 200,
+                      child: _typeSeries.isEmpty
+                          ? const _EmptyChart()
+                          : _buildTypePieChart(),
+                    ),
+                  ),
+                ],
+              )
+            else
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  _ChartCard(
                     height: 200,
                     child: _typeSeries.isEmpty
                         ? const _EmptyChart()
                         : _buildTypeBarChart(),
                   ),
-                ),
-                SizedBox(width: isDesktop ? 12 : 0, height: isDesktop ? 0 : 12),
-                Expanded(
-                  flex: isDesktop ? 2 : 0,
-                  child: _ChartCard(
+                  const SizedBox(height: 12),
+                  _ChartCard(
                     height: 200,
                     child: _typeSeries.isEmpty
                         ? const _EmptyChart()
                         : _buildTypePieChart(),
                   ),
-                ),
-              ],
-            ),
+                ],
+              ),
+            // ---------------------------------------------------------
+
             const SizedBox(height: 20),
 
             _SectionHeader(

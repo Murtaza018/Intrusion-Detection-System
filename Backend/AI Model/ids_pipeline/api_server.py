@@ -22,7 +22,8 @@ from datetime import datetime,timedelta,timezone
 
 import psycopg2
 from psycopg2.extras import RealDictCursor
-import os
+
+from werkzeug.security import check_password_hash
 
 import firebase_admin
 from firebase_admin import credentials, messaging
@@ -337,13 +338,54 @@ class APIServer:
                 traceback.print_exc()
                 return self._secure_response({"error": str(e)}, 500)
             
-    
+        # ── 0. Authentication ─────────────────────────────────────────
+
+        # ── 0. Authentication ─────────────────────────────────────────
+
+        @self.app.route("/api/auth/login", methods=['POST'])
+        @self._require_api_key
+        def login():
+            try:
+                data = request.json
+                if not data:
+                    return self._secure_response({"error": "No payload"}, 400)
+                
+                user = data.get('username')
+                password = data.get('password')
+
+                # Load secure credentials from environment variables
+                env_user = os.getenv("ADMIN_USERNAME", "admin")
+                env_pass_hash = os.getenv("ADMIN_PASSWORD_HASH")
+
+                if not env_pass_hash:
+                    print("[!] WARNING: ADMIN_PASSWORD_HASH not found in .env file!")
+                    return self._secure_response({"error": "Server Configuration Error"}, 500)
+
+                # Verify the username and securely check the hash
+                if user == env_user and check_password_hash(env_pass_hash, password):
+                    return self._secure_response({
+                        "status": "success", 
+                        "message": "Credentials verified",
+                        "token": "SESSION_AUTHORIZED"
+                    })
+                else:
+                    return self._secure_response({"error": "ACCESS DENIED: Invalid credentials"}, 401)
+            except Exception as e:
+                return self._secure_response({"error": str(e)}, 500)
     # ── 1. Pipeline control ───────────────────────────────────────
 
         @self.app.route("/api/pipeline/start", methods=['POST'])
         @_require_api_key
         def start_pipeline():
             try:
+                # FIX: Check if already running first to prevent crashes on frontend refresh
+                if self.pipeline_manager.is_running():
+                    return self._secure_response({
+                        "status": "started",
+                        "message": "IDS pipeline already running",
+                        "start_time": datetime.now().isoformat(),
+                    })
+
                 success = self.pipeline_manager.start()
                 if success:
                     return self._secure_response({

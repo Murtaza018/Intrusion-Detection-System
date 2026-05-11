@@ -22,6 +22,8 @@ import 'ids_state.dart';
 import 'retrain_job_poller.dart';
 
 class IdsProvider with ChangeNotifier {
+  bool _isInitializing = true;
+  bool get isInitializing => _isInitializing;
   IdsProvider() {
     _state.addListener(notifyListeners);
     IdsDiagnostics.runECCSaneCheck();
@@ -90,6 +92,7 @@ class IdsProvider with ChangeNotifier {
   Future<void> _initializeNotifications() async {
     await _api.setupNotifications();
   }
+
   // ---------------------------------------------------------------------------
   // Pipeline control
   // ---------------------------------------------------------------------------

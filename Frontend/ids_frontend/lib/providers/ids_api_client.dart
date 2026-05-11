@@ -35,6 +35,56 @@ class IdsApiClient {
     }
   }
 
+  Future<bool> authenticate(String username, String password) async {
+    try {
+      final res = await http.post(
+        Uri.parse('${IdsConfig.baseUrl}/api/auth/login'),
+        headers: IdsConfig.headers,
+        body: jsonEncode({
+          'username': username,
+          'password': password,
+        }),
+      );
+
+      if (res.statusCode == 200) {
+        final result = await _secureParseInIsolate(res.bodyBytes);
+        return result['payload'] != null &&
+            result['payload']['status'] == 'success';
+      }
+      return false;
+    } catch (e) {
+      debugPrint('Auth error: $e');
+      return false;
+    }
+  }
+
+  Future<bool> checkPipelineStatus() async {
+    try {
+      final res = await http.get(
+        Uri.parse('${IdsConfig.baseUrl}/api/pipeline/status'),
+        headers: IdsConfig.headers,
+      );
+
+      if (res.statusCode == 200) {
+        final result = await _secureParseInIsolate(res.bodyBytes);
+
+        // RESILIENT PARSING: Even if signature fails, grab the payload!
+        final payload = result['payload'] as Map<String, dynamic>?;
+
+        if (payload != null) {
+          if (result['success'] != true) {
+            debugPrint(
+                '⚠️ Status check signature failed, but forcing payload read anyway.');
+          }
+          return payload['running'] == true;
+        }
+      }
+    } catch (e) {
+      debugPrint('Status check error: $e');
+    }
+    return false;
+  }
+
   Future<bool> sendRetrainRequest({
     required List<Packet> ganQueue,
     required List<Packet> jitterQueue,

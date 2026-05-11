@@ -10,8 +10,8 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(BASE_DIR))
 load_dotenv(os.path.join(PROJECT_ROOT, ".env"))
 
 # NETWORK_INTERFACE = "VMware Network Adapter VMnet1"
-# NETWORK_INTERFACE = "Wi-Fi 2"
-NETWORK_INTERFACE = "VMware Virtual Ethernet Adapter for VMnet2"
+NETWORK_INTERFACE = "Wi-Fi 2"
+# NETWORK_INTERFACE = "VMware Virtual Ethernet Adapter for VMnet2"
 # NETWORK_INTERFACE = r"\Device\NPF_{98FACC85-B69E-4177-BBBF-0F143020C5D2}"
 # NETWORK_INTERFACE = r"\Device\NPF_{8D996E0E-B0D3-46C5-B341-AB294FB365E1}" #vmnet1 GUID
 

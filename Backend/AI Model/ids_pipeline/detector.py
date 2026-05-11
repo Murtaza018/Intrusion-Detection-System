@@ -125,10 +125,13 @@ class Detector:
             self.packet_queue.put(packet)
 
     def _detection_worker(self):
-        """Main detection loop using True Cascade Architecture for max speed"""
         print("[*] Detection worker started")
         gnn_model = self.model_loader.get_gnn_model()
         mae_model = self.model_loader.get_mae_model()
+        main_model = self.model_loader.get_main_model()
+        rf_model = self.model_loader.get_rf_model()
+        xgb_model = self.model_loader.get_xgb_model()
+        autoencoder = self.model_loader.get_autoencoder_model()
         
         while self.running:
             try:
@@ -149,12 +152,10 @@ class Detector:
                 packet_id = self.packet_storage.get_next_packet_id()
                 
                 if self.feature_extractor.is_scaling_enabled():
-                    
-                    main_model = self.model_loader.get_main_model()
+
                     cnn_prob = float(main_model(scaled_features, training=False)[0][0])
-                    
-                    rf_prob = self.model_loader.get_rf_model().predict_proba(scaled_features)[0][1] 
-                    xgb_prob = self.model_loader.get_xgb_model().predict_proba(scaled_features)[0][1] 
+                    rf_prob = rf_model.predict_proba(scaled_features)[0][1] 
+                    xgb_prob = xgb_model.predict_proba(scaled_features)[0][1]
 
                     ensemble_prob = max(cnn_prob, rf_prob, xgb_prob)
 
@@ -196,7 +197,6 @@ class Detector:
                                 mae_err = torch.mean((recon - original)**2).item()
 
                        
-                        autoencoder = self.model_loader.get_autoencoder_model()
                         reconstruction = autoencoder(scaled_features, training=False).numpy()
                         mse = np.mean(np.power(scaled_features - reconstruction, 2))
                         

@@ -6,6 +6,7 @@ import '../providers/ids_provider.dart';
 import '../widgets/packet_list.dart';
 import '../widgets/sensory_dashboard_widget.dart';
 import 'adaptation_screen.dart';
+import 'login_screen.dart';
 
 class DashboardScreen extends StatefulWidget {
   @override
@@ -85,13 +86,23 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 )
               : null,
           // On mobile, we need an AppBar to show the hamburger menu
+          // On mobile, we need an AppBar to show the hamburger menu
           appBar: !isDesktop
               ? AppBar(
-                  title: const Text("NEURAL-IDS CONTROL"),
-                  actions: const [
-                    Icon(Icons.notifications_none,
-                        color: Colors.white12, size: 24),
-                    SizedBox(width: 16),
+                  title: const Text("NEURAL-IDS CONTROL",
+                      style: TextStyle(fontSize: 14)),
+                  actions: [
+                    // --- SECURE LOGOUT FOR MOBILE ---
+                    IconButton(
+                      icon: const Icon(Icons.lock_outline,
+                          color: Colors.redAccent, size: 20),
+                      tooltip: 'Lock Terminal',
+                      onPressed: () {
+                        Navigator.of(context).pushReplacement(MaterialPageRoute(
+                            builder: (_) => const LoginScreen()));
+                      },
+                    ),
+                    const SizedBox(width: 8),
                   ],
                 )
               : null,
@@ -543,6 +554,34 @@ class _DashboardScreenState extends State<DashboardScreen> {
           ),
           const Spacer(),
           const Icon(Icons.notifications_none, color: Colors.white12, size: 18),
+          const SizedBox(width: 16),
+          // --- SECURE LOGOUT BUTTON FOR DESKTOP/PC ---
+          InkWell(
+            onTap: () {
+              Navigator.of(context).pushReplacement(
+                  MaterialPageRoute(builder: (_) => const LoginScreen()));
+            },
+            borderRadius: BorderRadius.circular(4),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              decoration: BoxDecoration(
+                border: Border.all(color: Colors.redAccent.withOpacity(0.3)),
+                borderRadius: BorderRadius.circular(4),
+              ),
+              child: const Row(
+                children: [
+                  Icon(Icons.lock_outline, color: Colors.redAccent, size: 14),
+                  SizedBox(width: 6),
+                  Text("LOCK TERMINAL",
+                      style: TextStyle(
+                          color: Colors.redAccent,
+                          fontSize: 10,
+                          fontWeight: FontWeight.bold,
+                          letterSpacing: 1)),
+                ],
+              ),
+            ),
+          ),
         ],
       ),
     );

@@ -7,14 +7,21 @@ sysctl -w net.ipv4.ip_forward=1
 nft flush ruleset 2>/dev/null || iptables -F
 
 
+Kali terminal setup:
+sudo ip addr add 203.0.113.10/24 dev eth0
+sudo ip link set eth0 up
+sudo ip route add default via 203.0.113.1
+
 
 scenario 1(inside subnet):
 in Inside-Pc-1 terminal:
-ping 203.0.113.10
+ping 192.168.50.10
 
 scenario 2(outside subnet):
 In Kali Linux VM terminal:
-sudo hping3 -S --flood -V 192.168.50.10
+sudo hping3 -S --flood -V 192.168.50.10(recommended)
+OR
+sudo nmap -sS -p- -T4 --max-retries 1 --min-rate 1000 192.168.50.10
 
 scenario 3(DMZ):
 run E:\Intrusion-Detection-System\Backend\AI Model\Check_models\pivot_attack.py

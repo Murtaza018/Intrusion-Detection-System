@@ -271,11 +271,11 @@ class _AdaptationScreenState extends State<AdaptationScreen> {
           border: const Border(
             top: BorderSide(color: Colors.white10),
           ),
-          boxShadow: [
+          boxShadow: const [
             BoxShadow(
               color: Colors.black12,
               blurRadius: 6,
-              offset: const Offset(0, -2),
+              offset: Offset(0, -2),
             ),
           ],
         ),
@@ -300,97 +300,113 @@ class _AdaptationScreenState extends State<AdaptationScreen> {
                   ),
                 ),
               ),
-            // Flex changes axis based on available width
-            Flex(
-              direction: isDesktop ? Axis.horizontal : Axis.vertical,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                if (hasGanPackets)
+
+            // --- THE FIX: Cleanly split Row and Column to prevent flex:0 crashes ---
+            if (isDesktop)
+              Row(
+                children: [
+                  if (hasGanPackets)
+                    Expanded(
+                      child: _buildConsistencyButton(
+                          context, provider, consistencyReady),
+                    ),
+                  if (hasGanPackets) const SizedBox(width: 12),
                   Expanded(
-                    flex: isDesktop ? 1 : 0,
-                    child: OutlinedButton.icon(
-                      onPressed:
-                          (!consistencyReady || provider.totalSelected <= 1)
-                              ? null
-                              : () => _showAnalysisDialog(context, provider),
-                      icon: const Icon(
-                        Icons.analytics_outlined,
-                        size: 18,
-                        color: Colors.white70,
-                      ),
-                      label: Text(
-                        provider.consistencyChecked
-                            ? "Re-Check"
-                            : "Check Consistency",
-                        style: const TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w500,
-                          color: Colors.white,
-                        ),
-                      ),
-                      style: OutlinedButton.styleFrom(
-                        side: const BorderSide(color: Color(0xFF7C4DFF)),
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(4),
-                        ),
-                      ),
-                    ),
+                    child: _buildTrainButton(context, provider, trainingReady),
                   ),
-                if (hasGanPackets)
-                  SizedBox(
-                      height: isDesktop ? 0 : 12, width: isDesktop ? 12 : 0),
-                Expanded(
-                  flex: isDesktop ? 1 : 0,
-                  child: ElevatedButton.icon(
-                    onPressed: !trainingReady
-                        ? null
-                        : () async {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                content: Text("Sending data..."),
-                                duration: Duration(seconds: 1),
-                                backgroundColor: Color(0xFF15191C),
-                              ),
-                            );
-                            final jobId = await provider.sendRetrainRequest();
-                            bool success = jobId != null;
-                            if (success) {
-                              provider.clearQueues();
-                              if (context.mounted) {
-                                Navigator.pop(context);
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(
-                                    content: Text("Training Queued!"),
-                                    backgroundColor: Color(0xFF15191C),
-                                  ),
-                                );
-                              }
-                            }
-                          },
-                    icon: const Icon(
-                      Icons.model_training,
-                      size: 18,
-                      color: Colors.white,
-                    ),
-                    label: const Text(
-                      "Start Retraining",
-                      style: TextStyle(fontSize: 12, color: Colors.white),
-                    ),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF7C4DFF),
-                      foregroundColor: Colors.white,
-                      elevation: 2,
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(4),
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
+                ],
+              )
+            else
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  if (hasGanPackets)
+                    _buildConsistencyButton(
+                        context, provider, consistencyReady),
+                  if (hasGanPackets) const SizedBox(height: 12),
+                  _buildTrainButton(context, provider, trainingReady),
+                ],
+              ),
           ],
+        ),
+      ),
+    );
+  }
+
+  // --- Extracted Buttons for Cleaner Layout ---
+  Widget _buildConsistencyButton(
+      BuildContext context, IdsProvider provider, bool consistencyReady) {
+    return OutlinedButton.icon(
+      onPressed: (!consistencyReady || provider.totalSelected <= 1)
+          ? null
+          : () => _showAnalysisDialog(context, provider),
+      icon: const Icon(
+        Icons.analytics_outlined,
+        size: 18,
+        color: Colors.white70,
+      ),
+      label: Text(
+        provider.consistencyChecked ? "Re-Check" : "Check Consistency",
+        style: const TextStyle(
+          fontSize: 12,
+          fontWeight: FontWeight.w500,
+          color: Colors.white,
+        ),
+      ),
+      style: OutlinedButton.styleFrom(
+        side: const BorderSide(color: Color(0xFF7C4DFF)),
+        padding: const EdgeInsets.symmetric(vertical: 14),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(4),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTrainButton(
+      BuildContext context, IdsProvider provider, bool trainingReady) {
+    return ElevatedButton.icon(
+      onPressed: !trainingReady
+          ? null
+          : () async {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text("Sending data..."),
+                  duration: Duration(seconds: 1),
+                  backgroundColor: Color(0xFF15191C),
+                ),
+              );
+              final jobId = await provider.sendRetrainRequest();
+              bool success = jobId != null;
+              if (success) {
+                provider.clearQueues();
+                if (context.mounted) {
+                  Navigator.pop(context);
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text("Training Queued!"),
+                      backgroundColor: Color(0xFF15191C),
+                    ),
+                  );
+                }
+              }
+            },
+      icon: const Icon(
+        Icons.model_training,
+        size: 18,
+        color: Colors.white,
+      ),
+      label: const Text(
+        "Start Retraining",
+        style: TextStyle(fontSize: 12, color: Colors.white),
+      ),
+      style: ElevatedButton.styleFrom(
+        backgroundColor: const Color(0xFF7C4DFF),
+        foregroundColor: Colors.white,
+        elevation: 2,
+        padding: const EdgeInsets.symmetric(vertical: 14),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(4),
         ),
       ),
     );

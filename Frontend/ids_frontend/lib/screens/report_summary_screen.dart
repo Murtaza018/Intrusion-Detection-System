@@ -241,6 +241,10 @@ class _ReportSummaryScreenState extends State<ReportSummaryScreen> {
     final a = (stats["attack"] ?? 0) / total;
     final z = (stats["zero_day"] ?? 0) / total;
 
+    final flexN = (n * 100).toInt();
+    final flexA = (a * 100).toInt();
+    final flexZ = (z * 100).toInt();
+
     return Column(
       children: [
         ClipRRect(
@@ -249,15 +253,19 @@ class _ReportSummaryScreenState extends State<ReportSummaryScreen> {
             height: 8,
             child: Row(
               children: [
-                Expanded(
-                    flex: (n * 100).toInt(),
-                    child: Container(color: Colors.greenAccent)),
-                Expanded(
-                    flex: (a * 100).toInt(),
-                    child: Container(color: Colors.orangeAccent)),
-                Expanded(
-                    flex: (z * 100).toInt(),
-                    child: Container(color: Colors.white)),
+                if (flexN > 0)
+                  Expanded(
+                      flex: flexN, child: Container(color: Colors.greenAccent)),
+                if (flexA > 0)
+                  Expanded(
+                      flex: flexA,
+                      child: Container(color: Colors.orangeAccent)),
+                if (flexZ > 0)
+                  Expanded(flex: flexZ, child: Container(color: Colors.white)),
+
+                // Fallback grey bar if absolutely no traffic exists yet
+                if (flexN == 0 && flexA == 0 && flexZ == 0)
+                  Expanded(flex: 1, child: Container(color: Colors.white12)),
               ],
             ),
           ),

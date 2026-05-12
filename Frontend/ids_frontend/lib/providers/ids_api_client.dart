@@ -10,6 +10,8 @@ import 'ids_config.dart';
 
 import 'package:firebase_messaging/firebase_messaging.dart';
 
+import 'dart:isolate';
+
 class IdsApiClient {
   Future<bool> startPipeline() async {
     try {
@@ -361,6 +363,28 @@ class IdsApiClient {
   }
 
   /// Decode + verify in one isolate round-trip.
+  // Future<Map<String, dynamic>> _secureParseInIsolate(Uint8List bodyBytes) {
+  //   return compute(secureParserIsolate, {
+  //     'bodyBytes': bodyBytes,
+  //     'pubX': IdsConfig.pubXHex,
+  //     'pubY': IdsConfig.pubYHex,
+  //   });
+  // }
+  /// Decode + verify in one isolate round-trip.
+  // Future<Map<String, dynamic>> _secureParseInIsolate(
+  //     Uint8List bodyBytes) async {
+  //   final pubX = IdsConfig.pubXHex;
+  //   final pubY = IdsConfig.pubYHex;
+
+  //   // Isolate.run transfers memory ownership instantly in O(1) time
+  //   // instead of blocking the main thread with a deep-copy.
+  //   return await Isolate.run(() => secureParserIsolate({
+  //         'bodyBytes': bodyBytes,
+  //         'pubX': pubX,
+  //         'pubY': pubY,
+  //       }));
+  // }
+  /// Decode + verify using web-safe compute()
   Future<Map<String, dynamic>> _secureParseInIsolate(Uint8List bodyBytes) {
     return compute(secureParserIsolate, {
       'bodyBytes': bodyBytes,

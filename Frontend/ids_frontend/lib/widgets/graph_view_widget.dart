@@ -70,8 +70,9 @@ class _GraphViewWidgetState extends State<GraphViewWidget>
   void _mergeIntoWindow(List<GraphNode> incoming) {
     for (final node in incoming) {
       if (_nodeWindow.containsKey(node.id)) {
-        final existing = _nodeWindow[node.id]!;
-        _nodeWindow[node.id] = existing.copyWith(anomaly: _norm(node.anomaly));
+        final existing = _nodeWindow.remove(node.id)!; // REMOVE IT
+        _nodeWindow[node.id] =
+            existing.copyWith(anomaly: _norm(node.anomaly)); // RE-INSERT AT END
       } else {
         _nodeWindow[node.id] = node.copyWith(anomaly: _norm(node.anomaly));
       }
@@ -83,6 +84,18 @@ class _GraphViewWidgetState extends State<GraphViewWidget>
 
   void _applyLayout() {
     _mergeIntoWindow(widget.graphData.nodes);
+
+    // --- NEW: Force frontend to obey backend edge reality ---
+    // Calculate which nodes actually have active connections right now
+    final activeNodeIds = <int>{};
+    for (final e in widget.graphData.edges) {
+      activeNodeIds.add(e.source);
+      activeNodeIds.add(e.target);
+    }
+
+    // Purge any node from our local window that has zero active connections
+    _nodeWindow.removeWhere((id, _) => !activeNodeIds.contains(id));
+    // --------------------------------------------------------
 
     final currentIds = _nodeWindow.keys.toSet();
     final topologyChanged = !setEquals(currentIds, _laidOutNodeIds);
